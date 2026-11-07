@@ -1,0 +1,129 @@
+@import url('https://ziro.oss-cn-shanghai.aliyuncs.com/fonts/MiSans-Medium/result.css');
+@import url('https://ziro.oss-cn-shanghai.aliyuncs.com/fonts/MiSans-Demibold/result.css');
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--foreground);
+  --color-secondary: var(--primary-soft);
+  --color-secondary-foreground: var(--primary-ink);
+  --color-accent: var(--primary-soft);
+  --color-accent-foreground: var(--primary-ink);
+  --color-input: var(--border);
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.75rem;
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--primary);
+  --color-destructive: var(--error-foreground);
+  --font-sans: 'MiSans Medium', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-display: 'MiSans Demibold', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+:root {
+  --background: #f4f6f8;
+  --foreground: #27313d;
+  --card: #ffffff;
+  --primary: #42a5f5;
+  --primary-foreground: #ffffff;
+  --primary-ink: #176aa5;
+  --primary-soft: #e9f4fe;
+  --muted: #edf1f5;
+  --muted-foreground: #768392;
+  --surface-soft: #f8fafc;
+  --surface-hover: #e3eaf1;
+  --border: #e1e7ee;
+  --navbar-height: 60px;
+  --player-height: 96px;
+  --selected-background: var(--card);
+  --error-foreground: #b7474d;
+  --error-background: #fceff0;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 600;
+}
+* {
+  box-sizing: border-box;
+}
+html {
+  scrollbar-gutter: stable;
+}
+body {
+  margin: 0;
+  min-width: 1100px;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-synthesis: none;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+button,
+a,
+input,
+textarea,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+button,
+a {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+h1,
+h2,
+h3,
+strong,
+b {
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+img {
+  display: block;
+  object-fit: cover;
+}
+::selection {
+  background: #d5ebfd;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@utility font-semibold {
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+@utility font-bold {
+  font-family: var(--font-display);
+  font-weight: 600;
+}

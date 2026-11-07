@@ -1,0 +1,81 @@
+.queueItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 8px;
+  border-radius: 7px;
+  position: relative;
+}
+
+.queueItem:hover {
+  background: var(--surface-soft);
+}
+
+.queueCover {
+  height: 39px;
+  width: 39px;
+  border-radius: 5px;
+}
+
+.queueItem.current {
+  color: var(--primary-ink);
+  background: var(--primary-soft);
+}
+
+.queueContent,
+.queueSelect {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  gap: 10px;
+}
+
+.queueSelect {
+  padding: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.queueSelect:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.queueDetails {
+  min-width: 0;
+  flex: 1;
+}
+
+.queueTitle {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.queueAuthor {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  margin-top: 4px;
+  color: var(--muted-foreground);
+}
+
+.dragHandle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.dragHandle:active {
+  cursor: grabbing;
+}
+
+.dragging {
+  opacity: 0.55;
+  background: var(--primary-soft);
+}

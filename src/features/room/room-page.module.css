@@ -1,0 +1,422 @@
+.roomPage {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: clip;
+}
+
+.roomHeader {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.roomTitle {
+  font-size: 19px;
+  font-weight: 550;
+}
+
+.roomMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  margin-top: 9px;
+}
+
+.roomContent {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+}
+
+.roomMain {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.participantsPanel,
+.nowPlayingPanel,
+.chatPanel {
+  background: var(--card);
+  border: 0;
+  border-radius: 12px;
+}
+
+.participantsPanel {
+  flex-shrink: 0;
+  max-height: 46%;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 18px;
+  min-height: 180px;
+}
+
+.participantsHeading {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.participantsTitle {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.memberCount,
+.stageCount {
+  font-family: var(--font-sans);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.stageCount {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.roomMemberAvatarStrip {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 4px 2px;
+}
+
+.memberAvatarGroup {
+  width: max-content;
+}
+
+.stageMemberList {
+  flex: 1;
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-top: 12px;
+}
+
+.stageMember {
+  position: relative;
+  display: flex;
+  flex: 0 0 96px;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 6px 2px;
+}
+
+.stageMemberAvatar {
+  position: relative;
+}
+
+.stageMemberOrder {
+  position: absolute;
+  left: -6px;
+  top: -3px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.stageMemberName {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  max-width: 100%;
+  margin-top: 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.stageMemberStatus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  margin-top: 3px;
+}
+
+.stagePlayingIndicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--primary-ink);
+  font-size: 10px;
+}
+
+.playingAvatarFallback {
+  color: var(--primary-ink);
+  background: var(--primary-soft);
+}
+
+.stageMemberRemove {
+  position: absolute;
+  top: 2px;
+  right: 0;
+}
+
+.stageMemberEmpty {
+  align-self: center;
+  width: 100%;
+  color: var(--muted-foreground);
+  text-align: center;
+  font-size: 12px;
+}
+
+.memberManagement {
+  margin-top: 24px;
+}
+
+.managementTitle {
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.memberManagementRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-block: 7px;
+  font-size: 12px;
+}
+
+.removeMemberButton {
+  margin-left: auto;
+}
+
+.nowPlayingPanel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 16px 24px;
+  overflow: hidden;
+}
+
+.nowPlayingTitle {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+
+.roomAlbum {
+  flex-shrink: 0;
+  height: 64px;
+  width: 64px;
+  border-radius: 9px;
+  margin: 14px auto 10px;
+}
+
+.trackTitle {
+  font-size: 20px;
+  font-weight: 550;
+}
+
+.trackAuthor {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  margin-top: 7px;
+}
+
+.roomLyrics {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  margin: 12px 0;
+  font-size: 12px;
+  color: #a8b3c0;
+  line-height: 2.8;
+}
+
+.lyricCurrent {
+  color: var(--primary-ink);
+  font-size: 14px;
+}
+
+.demoAudioLabel {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+
+.waitingStage {
+  flex: 1;
+  min-height: 0;
+  justify-content: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 19px;
+  padding: 12px 0;
+}
+
+.waitingTitle {
+  font-size: 18px;
+}
+
+.chatPanel {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chatHeader {
+  flex-shrink: 0;
+  height: 48px;
+  background: var(--surface-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+}
+
+.chatTitle {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.chatMessages {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 23px 17px;
+}
+
+.chatMessage {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 22px;
+}
+
+.chatBody {
+  max-width: 220px;
+}
+
+.chatAuthor {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.chatTime {
+  color: #9ba8b6;
+  font-size: 10px;
+}
+
+.chatBubble {
+  margin-top: 7px;
+  border-radius: 0 9px 9px 9px;
+  background: var(--muted);
+  color: #5d6e80;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.chatMessage.self {
+  flex-direction: row-reverse;
+}
+
+.chatMessage.self .chatAuthor {
+  justify-content: flex-end;
+}
+
+.self .chatBubble {
+  background: var(--primary-soft);
+  color: #335d7b;
+  border-radius: 9px 0 9px 9px;
+}
+
+.chatForm {
+  flex-shrink: 0;
+  margin: 0 15px 15px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--muted);
+  padding: 11px;
+}
+
+.chatInput {
+  width: 100%;
+  height: 57px;
+}
+
+.chatActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chatCount {
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+
+.connectionBanner {
+  flex-shrink: 0;
+  margin-bottom: 13px;
+  color: #866b26;
+  background: #faf3df;
+  padding: 10px 15px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.joinPage {
+  min-height: 60vh;
+}
+
+.passwordCard {
+  max-width: 360px;
+  margin: 55px auto;
+  text-align: center;
+  padding: 30px;
+  background: var(--card);
+  border-radius: 12px;
+}
+
+.passwordTitle {
+  font-size: 21px;
+  font-weight: 550;
+  margin-bottom: 24px;
+}
+
+.dangerZone {
+  padding-top: 24px;
+  margin-top: 25px;
+}
+
+.dangerDescription {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  line-height: 1.9;
+  margin-bottom: 15px;
+}

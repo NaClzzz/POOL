@@ -1,0 +1,176 @@
+.dockDivider {
+  width: 1px;
+  height: 22px;
+  background: var(--muted);
+}
+
+.playerDock {
+  --player-cover-size: 49px;
+  --player-main-button-size: 33px;
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 30;
+  min-width: 1100px;
+  height: var(--player-height);
+  background: var(--card);
+}
+
+.playerDockInner {
+  width: min(calc(100% - 70px), 1248px);
+  height: 100%;
+  margin-inline: auto;
+  display: grid;
+  grid-template-columns: minmax(270px, 1fr) minmax(360px, 1.2fr) minmax(260px, 1fr);
+  gap: 35px;
+  align-items: center;
+  padding-block: 12px;
+}
+
+.dockTrack {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.trackTitle {
+  font-size: 12px;
+}
+
+.trackAuthor {
+  font-size: 11px;
+}
+
+.dockCover {
+  width: var(--player-cover-size);
+  height: var(--player-cover-size);
+  border-radius: 8px;
+}
+
+.emptyCover {
+  display: grid;
+  place-items: center;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  flex-shrink: 0;
+}
+
+.dockCenter {
+  max-width: 460px;
+  width: 100%;
+  justify-self: center;
+}
+
+.playButtons {
+  position: relative;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+
+.playMain {
+  width: var(--player-main-button-size);
+  height: var(--player-main-button-size);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.secondaryPlayButton {
+  width: 26px;
+  height: 26px;
+}
+
+.playIcon {
+  width: 12px;
+  height: 12px;
+}
+
+.progressRow {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.progressSlider,
+.readonlyProgress {
+  flex: 1;
+  width: 0;
+}
+
+.dockTools {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: flex-end;
+  color: var(--muted-foreground);
+}
+
+.volumeSlider {
+  width: 76px;
+}
+
+.volumeIcon {
+  width: 14px;
+}
+
+.queueIcon {
+  width: 17px;
+}
+
+.roomDockCenter {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.roomProgress {
+  width: 100%;
+  max-width: 450px;
+}
+
+.roomPlaybackButton {
+  font-size: 11px;
+  height: 29px;
+}
+
+.readonlyProgress {
+  height: 3px;
+  background: var(--muted);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progressFill {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+  transition: width 0.2s linear;
+}
+
+.audioUnlock {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  padding: 0 12px;
+  border-radius: 5px;
+}
+
+.playMode {
+  position: absolute;
+  left: calc(50% - 98px);
+  width: 26px;
+  height: 26px;
+}
+
+.shuffleMode {
+  color: var(--primary-ink);
+  background: var(--primary-soft);
+}

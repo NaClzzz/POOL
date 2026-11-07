@@ -1,0 +1,135 @@
+.trackList {
+  background: transparent;
+  border: 0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.trackHeading,
+.trackRow {
+  display: grid;
+  grid-template-columns: 45px minmax(240px, 1.6fr) minmax(140px, 1fr) 70px 40px;
+  align-items: center;
+  column-gap: 16px;
+  padding: 0 22px;
+}
+
+.trackHeading {
+  height: 36px;
+  color: var(--muted-foreground);
+  background: transparent;
+  font-size: 12px;
+}
+
+.trackRow {
+  height: var(--track-row-height);
+  border-radius: 8px;
+  background: transparent;
+}
+
+.trackRow:hover,
+.trackRow:focus-within,
+.trackRow.isCurrent {
+  background: var(--selected-background);
+}
+
+.trackNumber {
+  position: relative;
+  color: #96a3b0;
+  border: 0;
+  background: transparent;
+  width: 26px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.playingIcon {
+  color: var(--primary-ink);
+}
+
+.rowPlay {
+  display: none;
+  color: var(--primary-ink);
+}
+
+.trackRow:hover .numberText {
+  display: none;
+}
+
+.trackRow:hover .rowPlay {
+  display: block;
+}
+
+.trackMain {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  text-align: left;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.trackCover {
+  width: 36px;
+  height: 36px;
+  border-radius: 7px;
+}
+
+.trackTitle {
+  display: block;
+  font-weight: 500;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trackAuthor {
+  display: block;
+  font-size: 11px;
+  margin-top: 4px;
+  color: var(--muted-foreground);
+}
+
+.trackAlbum,
+.trackDuration {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.trackDuration {
+  font-variant-numeric: tabular-nums;
+}
+
+.actionIcon,
+.rowPlay,
+.playingIcon {
+  width: 15px;
+  height: 15px;
+}
+
+.trackHeading.compact,
+.trackRow.compact {
+  grid-template-columns: 20px minmax(130px, 1fr) 40px 30px;
+  column-gap: 8px;
+  padding: 0 10px;
+}
+
+.trackRow.compact .trackMain {
+  gap: 9px;
+}
+
+.compact .trackCover {
+  width: 33px;
+  height: 33px;
+}
+
+.virtualTrackScroll {
+  height: 590px;
+  overflow: auto;
+}

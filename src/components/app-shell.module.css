@@ -1,0 +1,102 @@
+.appShell {
+  padding-top: var(--navbar-height);
+  padding-bottom: calc(var(--player-height) + 20px);
+  min-height: 100vh;
+}
+
+.topbar {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 40;
+  min-width: 1100px;
+  height: var(--navbar-height);
+  background: var(--card);
+}
+
+.navInner {
+  max-width: 1352px;
+  padding: 0 44px;
+  height: 100%;
+  margin: auto;
+  display: flex;
+  align-items: center;
+  gap: 72px;
+}
+
+.nav {
+  display: flex;
+  height: 100%;
+  gap: 32px;
+  align-items: stretch;
+}
+
+.navLink {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  color: var(--muted-foreground);
+  font-size: 14px;
+}
+
+.navLink:hover {
+  color: #111111;
+}
+
+.navLink.active {
+  color: #111111;
+  background: transparent;
+  font-weight: 600;
+  font-family: var(--font-display);
+}
+
+.navLink.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 8px;
+  right: 8px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--primary);
+}
+
+.navAccount {
+  margin-left: auto;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+}
+
+.demoChip {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.navDivider {
+  width: 1px;
+  height: 22px;
+  background: var(--muted);
+}
+
+.page {
+  max-width: 1336px;
+  margin: 0 auto;
+  padding: 30px 44px;
+  min-height: calc(100dvh - var(--navbar-height) - var(--player-height) - 20px);
+}
+
+.roomShell {
+  height: 100dvh;
+  min-height: 0;
+  padding-bottom: var(--player-height);
+  overflow: clip;
+}
+
+.page.roomRoute {
+  max-width: 1600px;
+  height: 100%;
+  min-height: 0;
+  padding: 18px 44px;
+  overflow: clip;
+}

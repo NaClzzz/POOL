@@ -1,0 +1,8 @@
+.embedded {
+  background: transparent;
+  color: var(--foreground);
+}
+
+.compact {
+  font-size: 12px;
+}

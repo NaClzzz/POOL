@@ -1,0 +1,51 @@
+.generationPanel {
+  padding: 10px 0;
+}
+
+.generationEmpty {
+  padding: 24px 0;
+}
+
+.emptyDescription {
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.generatedCopy {
+  white-space: pre-wrap;
+  line-height: var(--generated-copy-line-height, 2.4);
+  font-size: 14px;
+  color: #536170;
+}
+
+.textCursor {
+  display: inline-block;
+  height: 14px;
+  width: 2px;
+  background: var(--primary);
+  margin-left: 4px;
+  vertical-align: middle;
+  animation: blink 1s steps(1) infinite;
+}
+
+.generationActions {
+  margin-top: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.generationStatus {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
