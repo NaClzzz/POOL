@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { useState } from 'react'
 import {
   Heart,
+  LoaderCircle,
   ListMusic,
   Pause,
   Play,
@@ -18,7 +19,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { usePlayer } from '@/stores/player'
 import { useSession } from '@/stores/session'
-import { api } from '@/mocks/api'
+import { likesApi } from '@/lib/api-client'
 import { trackKey } from '@/contracts/domain'
 import { formatTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -34,13 +35,13 @@ export function PersonalPlayerDock() {
   const client = useQueryClient()
   const likes = useQuery({
     queryKey: ['likes', user?.id],
-    queryFn: () => api.likes(),
+    queryFn: ({ signal }) => likesApi.list(signal),
     enabled: !!user,
   })
   const track = state.queue[state.index]
   const liked = !!track && likes.data?.some((t) => trackKey(t) === trackKey(track))
   const like = useMutation({
-    mutationFn: () => (liked ? api.removeLike(track!) : api.addLike(track!)),
+    mutationFn: () => (liked ? likesApi.remove(track!) : likesApi.add(track!)),
     onSuccess: () => client.invalidateQueries({ queryKey: ['likes', user?.id] }),
   })
   if (state.roomActive) return null
@@ -61,7 +62,9 @@ export function PersonalPlayerDock() {
                 {track?.title ?? '未选择歌曲'}
               </p>
               <p className={cn(styles.trackAuthor, 'mt-1 truncate text-xs text-muted-foreground')}>
-                {state.error || track?.author || '选择歌曲后播放'}
+                {state.error ||
+                  (state.loading ? '正在解析播放资源…' : track?.author) ||
+                  '选择歌曲后播放'}
               </p>
             </div>
             {track && (
@@ -70,7 +73,10 @@ export function PersonalPlayerDock() {
                 size="icon"
                 aria-label={liked ? '取消喜欢' : '加入喜欢'}
                 onClick={() => like.mutate()}
-                disabled={like.isPending}
+                disabled={like.isPending || (likes.data?.length === 500 && !liked)}
+                title={
+                  likes.data?.length === 500 && !liked ? '喜欢列表已满，最多 500 首' : undefined
+                }
               >
                 <Heart className={liked ? 'fill-primary text-primary' : ''} />
               </Button>
@@ -118,7 +124,9 @@ export function PersonalPlayerDock() {
                 disabled={!track}
                 onClick={state.toggle}
               >
-                {state.playing ? (
+                {state.loading ? (
+                  <LoaderCircle className={cn(styles.playIcon, 'animate-spin')} />
+                ) : state.playing ? (
                   <Pause className={cn(styles.playIcon, 'fill-current')} />
                 ) : (
                   <Play className={cn(styles.playIcon, 'fill-current')} />
@@ -141,10 +149,10 @@ export function PersonalPlayerDock() {
                 className={styles.progressSlider}
                 aria-label="个人播放进度"
                 min={0}
-                max={state.duration || 24}
+                max={state.duration || 1}
                 step={0.1}
                 value={[Math.min(state.position, state.duration)]}
-                disabled={!track}
+                disabled={!track || state.loading}
                 onValueChange={(value) => state.seek((value as number[])[0])}
               />
               <span>{formatTime(track ? state.duration * 1000 : null)}</span>

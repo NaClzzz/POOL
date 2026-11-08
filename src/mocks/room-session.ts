@@ -257,7 +257,7 @@ export class MockRoomSession {
     this.savePlaylist()
   }
   /** 支持清空、确定性打乱和导入喜欢，不超过上限。 */
-  playlistAction(action: 'clear' | 'shuffle' | 'import') {
+  playlistAction(action: 'clear' | 'shuffle' | 'import', imported?: Track[]) {
     this.assertConnected()
     if (action === 'clear') this.snapshot.myPlaylist = []
     if (action === 'shuffle')
@@ -267,7 +267,7 @@ export class MockRoomSession {
       ]
     if (action === 'import') {
       const seen = new Set(this.snapshot.myPlaylist.map(trackKey))
-      for (const t of getDatabase().likes[this.user.id] ?? [])
+      for (const t of imported ?? getDatabase().likes[this.user.id] ?? [])
         if (!seen.has(trackKey(t)) && this.snapshot.myPlaylist.length < 500) {
           this.snapshot.myPlaylist.push(t)
           seen.add(trackKey(t))

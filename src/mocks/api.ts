@@ -385,13 +385,14 @@ export async function generateText(
   roomId: string | undefined,
   onText: (text: string) => void,
   signal: AbortSignal,
+  analysisTracks?: Track[],
 ) {
   const user = requireUser()
   const key = kind === 'analysis' ? `analysis:${user.id}` : `summary:${roomId}`
   if (running.has(key))
     throw new ApiError('SUMMARY_GENERATING', '正在生成，请等待当前请求完成', 409)
   if (generatingCount >= 10) throw new ApiError('AI_BUSY', '当前生成名额已满，请稍后重试', 503)
-  if (kind === 'analysis' && !getDatabase().likes[user.id]?.length)
+  if (kind === 'analysis' && !(analysisTracks ?? getDatabase().likes[user.id])?.length)
     throw new ApiError('EMPTY_PLAYLIST', '请先添加喜欢的歌曲')
   running.add(key)
   generatingCount++

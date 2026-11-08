@@ -1,71 +1,142 @@
 'use client'
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { usePlayer } from '@/stores/player'
-import type { Playback, Track } from '@/contracts/domain'
+import { trackKey, type Playback, type Track } from '@/contracts/domain'
+import { musicApi, HttpError } from '@/lib/api-client'
 
 /** 将统一条目映射到本地原创演示资源，不使用平台真实地址。 */
 export function audioUrl(track: Track) {
   return `/audio/${track.extra?.demoAudio === 'dusk' ? 'dusk' : 'tide'}.wav`
 }
 
-/** 唯一常驻个人音频元素，按曲目、播放意图和定位请求分别更新。 */
+/** 常驻个人音频只播放统一服务解析的真实资源，取消旧解析防止切歌竞争。 */
 export function PersonalAudio() {
   const ref = useRef<HTMLAudioElement>(null)
-  const track = usePlayer((s) => s.queue[s.index])
-  const playing = usePlayer((s) => s.playing)
-  const volume = usePlayer((s) => s.volume)
-  const seekTo = usePlayer((s) => s.seekTo)
-  const roomActive = usePlayer((s) => s.roomActive)
+  const ready = useRef(false)
+  const expiresAt = useRef<number | null>(null)
+  const track = usePlayer((state) => state.queue[state.index])
+  const playing = usePlayer((state) => state.playing)
+  const volume = usePlayer((state) => state.volume)
+  const seekTo = usePlayer((state) => state.seekTo)
+  const roomActive = usePlayer((state) => state.roomActive)
+  const loadVersion = usePlayer((state) => state.loadVersion)
+
+  /** 浏览器自动播放限制仅暂停本机，不能误判曲目不可播放而跳歌。 */
+  const playAudio = (audio: HTMLAudioElement) => {
+    const source = audio.src
+    void audio.play().catch((error: DOMException) => {
+      if (!ready.current || audio.src !== source) return
+      if (error.name === 'AbortError') return
+      if (error.name === 'NotAllowedError')
+        usePlayer.setState({ playing: false, error: '点击播放以启用声音' })
+      else {
+        ready.current = false
+        usePlayer.getState().failTrack('音频播放失败，请重试')
+      }
+    })
+  }
+
   useEffect(() => {
     const audio = ref.current!
-    if (!track) {
+    const controller = new AbortController()
+    let active = true
+    ready.current = false
+    audio.pause()
+    audio.removeAttribute('src')
+    audio.load()
+    if (!track || roomActive) {
+      usePlayer.setState({ loading: false })
+      return
+    }
+    usePlayer.setState({ loading: true })
+    void musicApi
+      .playback(track, controller.signal)
+      .then((resource) => {
+        if (!active) return
+        audio.src = resource.url
+        audio.dataset.trackKey = trackKey(track)
+        expiresAt.current = resource.expires_at ? Date.parse(resource.expires_at) : null
+        ready.current = true
+        audio.load()
+        usePlayer.setState({
+          loading: false,
+          duration: (resource.duration_ms ?? track.duration_ms ?? 0) / 1000,
+        })
+        if (usePlayer.getState().playing) playAudio(audio)
+      })
+      .catch((error: Error) => {
+        if (!active || controller.signal.aborted) return
+        if (
+          error instanceof HttpError &&
+          ['TRACK_UNPLAYABLE', 'TRACK_NOT_FOUND', 'CAPABILITY_NOT_SUPPORTED'].includes(error.code)
+        )
+          usePlayer.getState().failTrack(error.message)
+        else
+          usePlayer.setState({
+            loading: false,
+            playing: false,
+            error: error.message || '播放资源解析失败，请重试',
+          })
+      })
+    return () => {
+      active = false
+      controller.abort()
+      ready.current = false
       audio.pause()
       audio.removeAttribute('src')
       audio.load()
-      return
     }
-    audio.src = audioUrl(track)
-    audio.load()
-    return () => {
-      audio.pause()
-    }
-  }, [track])
+  }, [track, roomActive, loadVersion])
+
   useEffect(() => {
     const audio = ref.current!
-    if (playing && !roomActive && track)
-      void audio
-        .play()
-        .catch(() => usePlayer.setState({ playing: false, error: '点击播放以启用声音' }))
-    else audio.pause()
-  }, [playing, roomActive, track])
+    if (!playing || roomActive) {
+      audio.pause()
+      return
+    }
+    if (!ready.current) return
+    if (expiresAt.current !== null && expiresAt.current <= Date.now())
+      usePlayer.getState().reloadPlayback()
+    else playAudio(audio)
+  }, [playing, roomActive])
   useEffect(() => {
     ref.current!.volume = volume
   }, [volume])
   useEffect(() => {
-    if (seekTo !== null && ref.current!.readyState >= 1) {
-      ref.current!.currentTime = seekTo
+    const audio = ref.current!
+    if (seekTo !== null && ready.current && audio.readyState >= 1) {
+      audio.currentTime = seekTo
       usePlayer.setState({ seekTo: null })
-      if (usePlayer.getState().playing)
-        void ref
-          .current!.play()
-          .catch(() => usePlayer.setState({ playing: false, error: '点击播放以启用声音' }))
+      if (usePlayer.getState().playing) playAudio(audio)
     }
   }, [seekTo])
   return (
     <audio
       ref={ref}
       preload="metadata"
-      onLoadedMetadata={(e) => {
-        const audio = e.currentTarget
+      onLoadedMetadata={(event) => {
+        const audio = event.currentTarget
+        if (!track || audio.dataset.trackKey !== trackKey(track) || !ready.current) return
         usePlayer.setState({ duration: audio.duration })
-        if (usePlayer.getState().seekTo !== null) {
-          audio.currentTime = usePlayer.getState().seekTo!
+        const target = usePlayer.getState().seekTo
+        if (target !== null) {
+          audio.currentTime = Math.min(target, audio.duration)
           usePlayer.setState({ seekTo: null })
         }
       }}
-      onTimeUpdate={(e) => usePlayer.setState({ position: e.currentTarget.currentTime })}
+      onPlaying={() => {
+        if (ready.current) usePlayer.setState({ failedCount: 0, error: null })
+      }}
+      onTimeUpdate={(event) =>
+        ready.current && usePlayer.setState({ position: event.currentTarget.currentTime })
+      }
       onEnded={() => usePlayer.getState().next()}
-      onError={() => usePlayer.setState({ playing: false, error: '演示音频加载失败，请重试' })}
+      onError={() => {
+        if (ready.current && !roomActive) {
+          ready.current = false
+          usePlayer.getState().failTrack('当前音频加载失败')
+        }
+      }}
     />
   )
 }

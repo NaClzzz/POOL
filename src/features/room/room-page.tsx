@@ -21,6 +21,7 @@ import {
   Volume2,
 } from 'lucide-react'
 import { api } from '@/mocks/api'
+import { likesApi } from '@/lib/api-client'
 import { MockRoomSession } from '@/mocks/room-session'
 import { DEMO_ROOM_PASSWORD } from '@/mocks/fixtures'
 import type { RoomSnapshot, Track } from '@/contracts/domain'
@@ -260,6 +261,21 @@ export function RoomPage({ code }: { code: string }) {
   }
   /** 个人房间歌单的添加行为不改变个人播放器队列。 */
   const add = (track: Track) => command((service) => service.addTrack(track))
+  /** 房间仍为模拟服务，但导入喜欢读取真实 PostgreSQL 收藏。 */
+  const playlistAction = async (action: 'clear' | 'shuffle' | 'import') => {
+    if (action !== 'import') {
+      command((service) => service.playlistAction(action))
+      return
+    }
+    const current = session.current
+    try {
+      const tracks = await likesApi.list()
+      if (session.current === current)
+        command((service) => service.playlistAction('import', tracks))
+    } catch (failure) {
+      if (alive.current) setError((failure as Error).message)
+    }
+  }
   if (!snapshot)
     return (
       <div className={styles.joinPage}>
@@ -689,7 +705,7 @@ export function RoomPage({ code }: { code: string }) {
           onAdd={add}
           onMove={(track, toIndex) => command((service) => service.moveTrack(track, toIndex))}
           onRemove={(track) => command((service) => service.removeTrack(track))}
-          onAction={(action) => command((service) => service.playlistAction(action))}
+          onAction={(action) => void playlistAction(action)}
         />
       </div>
     </Sheet>

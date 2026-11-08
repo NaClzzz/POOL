@@ -7,7 +7,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Check, LogOut, RotateCcw, Volume2 } from 'lucide-react'
 import { useSession } from '@/stores/session'
 import { usePlayer } from '@/stores/player'
-import { fillLikes, getDatabase, resetDemo, setScenario } from '@/mocks/api'
+import { getDatabase, resetDemo, setScenario } from '@/mocks/api'
 import type { DemoScenario } from '@/contracts/domain'
 import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/page-header'
@@ -115,7 +115,7 @@ export function SettingsPage() {
           <h2 className={styles.sectionTitle}>演示选项</h2>
         </div>
         <p className={styles.settingsDescription}>
-          所有数据都留在当前浏览器，可重复检查不同交互状态。
+          以下场景只影响模拟房间与 AI，不影响真实账号、音乐查询及收藏。
         </p>
         <div className={styles.scenarioGrid}>
           {scenarios.map(([value, title, text]) => (
@@ -138,26 +138,10 @@ export function SettingsPage() {
         </div>
         <div className={styles.settingRow}>
           <div>
-            <h3 className={styles.settingTitle}>长列表与收藏上限</h3>
-            <p className={styles.settingDescription}>
-              准备 498 首喜欢，验证长列表与导入至 500 首的行为。
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            onClick={() => {
-              fillLikes()
-              void client.invalidateQueries({ queryKey: ['likes', user.id] })
-              setNotice('已准备 498 首喜欢，去喜欢页查看')
-            }}
-          >
-            准备容量演示
-          </Button>
-        </div>
-        <div className={styles.settingRow}>
-          <div>
             <h3 className={styles.settingTitle}>重置演示数据</h3>
-            <p className={styles.settingDescription}>重置喜欢、房间、历史、总结和演示场景。</p>
+            <p className={styles.settingDescription}>
+              重置模拟房间、历史、总结和演示场景，不修改真实账号与喜欢。
+            </p>
           </div>
           <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
             <AlertDialogTrigger render={<Button variant="outline" />}>
@@ -168,7 +152,7 @@ export function SettingsPage() {
               <AlertDialogHeader>
                 <AlertDialogTitle>重置演示数据？</AlertDialogTitle>
                 <AlertDialogDescription>
-                  喜欢、房间、历史、总结和演示场景将恢复默认值。当前登录会保留。
+                  模拟房间、历史、总结和演示场景将恢复默认值；真实喜欢和账号保留。
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

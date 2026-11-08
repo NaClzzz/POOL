@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Feather, LoaderCircle, RotateCcw, Square } from 'lucide-react'
 import { generateText } from '@/mocks/api'
 import { Button } from '@/components/ui/button'
+import type { Track } from '@/contracts/domain'
 
 /** 固定内容分段生成界面，真实 AI SDK 由独立生成服务接入。 */
 export function GenerationPanel({
@@ -13,11 +14,13 @@ export function GenerationPanel({
   roomId,
   initial = '',
   onComplete,
+  tracks,
 }: {
   kind: 'analysis' | 'summary'
   roomId?: string
   initial?: string
   onComplete?: () => void
+  tracks?: Track[]
 }) {
   const [text, setText] = useState(initial)
   const [status, setStatus] = useState<'idle' | 'working' | 'done' | 'error'>(
@@ -34,7 +37,7 @@ export function GenerationPanel({
     setError('')
     setText('')
     try {
-      await generateText(kind, roomId, setText, controller.current.signal)
+      await generateText(kind, roomId, setText, controller.current.signal, tracks)
       setStatus('done')
       onComplete?.()
     } catch (failure) {

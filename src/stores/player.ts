@@ -27,6 +27,11 @@ type PlayerStore = {
   seekTo: number | null
   roomActive: boolean
   error: string | null
+  loading: boolean
+  loadVersion: number
+  failedCount: number
+  failTrack: (message: string) => void
+  reloadPlayback: () => void
   play: (track: Track, context?: Track[]) => void
   toggle: () => void
   next: () => void
@@ -55,6 +60,9 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
   seekTo: null,
   roomActive: false,
   error: null,
+  loading: false,
+  loadVersion: 0,
+  failedCount: 0,
   play: (track, context) => {
     const baseQueue = context?.length ? [...context] : [track]
     const current = baseQueue.find((t) => trackKey(t) === trackKey(track))!
@@ -63,6 +71,8 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
     set({
       baseQueue,
       queue,
+      duration: (current.duration_ms ?? 0) / 1000,
+      failedCount: 0,
       index: queue.indexOf(current),
       playing: true,
       position: 0,
@@ -73,12 +83,28 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
   /** 从现有队列选择歌曲，复用统一的音频定位入口。 */
   select: (index) => {
     if (!Number.isInteger(index) || index < 0 || index >= get().queue.length) return
-    set({ index, playing: true, position: 0, seekTo: 0, error: null })
+    set({
+      index,
+      playing: true,
+      position: 0,
+      seekTo: 0,
+      error: null,
+      failedCount: 0,
+      duration: (get().queue[index].duration_ms ?? 0) / 1000,
+    })
   },
-  toggle: () => set((s) => ({ playing: !s.playing, error: null })),
+  toggle: () =>
+    set((s) => ({
+      playing: !s.playing,
+      error: null,
+      failedCount: 0,
+      ...(s.error && !s.playing ? { loadVersion: s.loadVersion + 1 } : {}),
+    })),
   next: () =>
     set((s) => ({
       index: (s.index + 1) % Math.max(1, s.queue.length),
+      duration: (s.queue[(s.index + 1) % Math.max(1, s.queue.length)]?.duration_ms ?? 0) / 1000,
+      failedCount: 0,
       position: 0,
       seekTo: 0,
       playing: true,
@@ -87,6 +113,10 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
   previous: () =>
     set((s) => ({
       index: (s.index - 1 + s.queue.length) % Math.max(1, s.queue.length),
+      duration:
+        (s.queue[(s.index - 1 + s.queue.length) % Math.max(1, s.queue.length)]?.duration_ms ?? 0) /
+        1000,
+      failedCount: 0,
       position: 0,
       seekTo: 0,
       playing: true,
@@ -150,11 +180,34 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
       playbackMode === 'shuffle' ? shuffleKeepingCurrent(s.queue, current) : [...s.baseQueue]
     set({ playbackMode, queue, index: Math.max(0, queue.indexOf(current)) })
   },
+  /** 不可播放时跳到下一首；整轮都失败则停止，避免无限循环请求。 */
+  failTrack: (message) =>
+    set((state) => {
+      const failedCount = state.failedCount + 1
+      if (failedCount >= state.queue.length)
+        return { playing: false, loading: false, error: message, failedCount }
+      const index = (state.index + 1) % state.queue.length
+      return {
+        index,
+        failedCount,
+        position: 0,
+        seekTo: 0,
+        loading: false,
+        duration: (state.queue[index].duration_ms ?? 0) / 1000,
+        error: `已跳过不可播放歌曲：${message}`,
+      }
+    }),
+  /** 暂停过久后的恢复重新解析地址，保留当前播放位置。 */
+  reloadPlayback: () =>
+    set((state) => ({ loadVersion: state.loadVersion + 1, seekTo: state.position })),
   setRoom: (active) => set({ roomActive: active, playing: false }),
   reset: () =>
     set({
       queue: [],
       baseQueue: [],
+      failedCount: 0,
+      loading: false,
+      loadVersion: 0,
       playbackMode: 'sequential',
       index: 0,
       playing: false,

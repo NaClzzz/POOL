@@ -29,6 +29,7 @@ export function AuthPage({ registerMode = false }: { registerMode?: boolean }) {
     formState: { errors, isSubmitting },
   } = useForm<AuthFields>({ defaultValues: { email: '', password: '', name: '' } })
   const returnTo = authReturnTo(params.get('returnTo'))
+
   useEffect(() => {
     if (ready && user) router.replace(returnTo)
   }, [ready, user, returnTo, router])

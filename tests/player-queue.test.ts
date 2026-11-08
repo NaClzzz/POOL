@@ -7,6 +7,30 @@ beforeEach(() => usePlayer.getState().reset())
 afterEach(() => vi.restoreAllMocks())
 
 describe('个人播放队列与模式切换', () => {
+  it('不可播放时继续队列，整轮失败后停止，避免无限解析', () => {
+    const tracks = catalog.slice(0, 3)
+    usePlayer.getState().play(tracks[0], tracks)
+    usePlayer.getState().failTrack('没有可用资源')
+    expect(usePlayer.getState()).toMatchObject({ index: 1, playing: true, failedCount: 1 })
+    usePlayer.getState().failTrack('仅有试听')
+    usePlayer.getState().failTrack('资源不存在')
+    expect(usePlayer.getState()).toMatchObject({ index: 2, playing: false, failedCount: 3 })
+    usePlayer.getState().toggle()
+    expect(usePlayer.getState()).toMatchObject({ playing: true, failedCount: 0, loadVersion: 1 })
+  })
+
+  it('播放地址过期后重新解析时保留当前定位，不更换曲目', () => {
+    usePlayer.getState().play(catalog[0])
+    usePlayer.setState({ position: 90, seekTo: null })
+    usePlayer.getState().reloadPlayback()
+    expect(usePlayer.getState()).toMatchObject({
+      index: 0,
+      position: 90,
+      seekTo: 90,
+      loadVersion: 1,
+    })
+  })
+
   it('顺序模式按列表循环前进和后退', () => {
     const list = catalog.slice(0, 4)
     usePlayer.getState().play(list[3], list)

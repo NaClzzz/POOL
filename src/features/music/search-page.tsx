@@ -2,11 +2,12 @@
 import { cn } from '@/lib/utils'
 import styles from '@/features/music/search-page.module.css'
 import sharedStyles from '@/components/presentation.module.css'
-import { useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery } from '@tanstack/react-query'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useState, type FormEvent } from 'react'
 import { Search } from 'lucide-react'
-import { api } from '@/mocks/api'
+import { musicApi, HttpError } from '@/lib/api-client'
+import type { MusicSource } from '@/contracts/domain'
 import { TrackList } from './track-list'
 import { Empty, ErrorState, Loading } from '@/components/feedback'
 import { Button } from '@/components/ui/button'
@@ -17,13 +18,18 @@ import { Input } from '@/components/ui/input'
 export function SearchPage() {
   const params = useSearchParams()
   const router = useRouter()
-  const source = params.get('source') === 'bilibili' ? 'bilibili' : 'netease'
+  const source: MusicSource = params.get('source') === 'bilibili' ? 'bilibili' : 'netease'
   const q = params.get('q') || ''
   const [input, setInput] = useState(q)
-  const query = useQuery({
+  const query = useInfiniteQuery({
     queryKey: ['music', 'search', source, q],
-    queryFn: ({ signal }) => api.search(source, q, signal),
+    initialPageParam: 0,
+    queryFn: ({ signal, pageParam }) => musicApi.search(source, q, pageParam, 30, signal),
+    getNextPageParam: (page) => (page.hasMore ? page.offset + page.limit : undefined),
+    enabled: !!q,
   })
+  const tracks = query.data?.pages.flatMap((page) => page.items) ?? []
+  const total = query.data?.pages[0]?.total
   /** 将提交过的搜索条件写进 URL，输入中不请求服务。 */
   const search = (event: FormEvent) => {
     event.preventDefault()
@@ -72,14 +78,37 @@ export function SearchPage() {
       <section>
         <div className={styles.sectionTitle}>
           <h2 className={styles.sectionHeading}>{q ? `“${q}” 的搜索结果` : '歌曲'}</h2>
-          {query.data && <span className={sharedStyles.resultCount}>{query.data.length} 首</span>}
+          {query.data && (
+            <span className={sharedStyles.resultCount}>{total ?? tracks.length} 首</span>
+          )}
         </div>
-        {query.isPending ? (
+        {!q ? (
+          <Empty title="搜索歌曲或作者" />
+        ) : query.isPending ? (
           <Loading />
         ) : query.isError ? (
-          <ErrorState error={query.error} retry={() => void query.refetch()} />
-        ) : query.data.length ? (
-          <TrackList tracks={query.data} />
+          query.error instanceof HttpError && query.error.code === 'CAPABILITY_NOT_SUPPORTED' ? (
+            <Empty title={query.error.message} />
+          ) : (
+            <ErrorState error={query.error} retry={() => void query.refetch()} />
+          )
+        ) : tracks.length ? (
+          <>
+            <TrackList tracks={tracks} />
+            {query.hasNextPage && (
+              <Button
+                className="mt-4"
+                variant="outline"
+                disabled={query.isFetchingNextPage}
+                onClick={() => void query.fetchNextPage()}
+              >
+                {query.isFetchingNextPage ? '正在加载…' : '加载更多'}
+              </Button>
+            )}
+            {query.isFetchNextPageError && (
+              <p className={sharedStyles.inlineError}>加载下一页失败，可重试。</p>
+            )}
+          </>
         ) : (
           <Empty title="没有找到这首歌" text="试试另一个关键词，或换个音源看看。" />
         )}

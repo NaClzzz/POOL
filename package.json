@@ -18,7 +18,10 @@
     "db:migrate": "node --env-file=.env node_modules/drizzle-kit/bin.cjs migrate",
     "infra:up": "docker compose up -d --wait",
     "infra:stop": "docker compose stop",
-    "test:integration": "node --conditions=react-server --env-file=.env --import tsx --test tests/integration/auth.integration.ts"
+    "test:integration": "node --conditions=react-server --env-file=.env --import tsx --test tests/integration/auth.integration.ts tests/integration/music.integration.ts",
+    "music:dev": "node --env-file=.env scripts/start-music.mjs",
+    "test:music": "node --conditions=react-server --env-file=.env --import tsx --test tests/integration/music.integration.ts",
+    "test:music:live": "node --conditions=react-server --env-file=.env --import tsx --test tests/integration/music-live.integration.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

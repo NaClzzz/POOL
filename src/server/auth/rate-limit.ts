@@ -1,24 +1,7 @@
 import { createHash } from 'node:crypto'
-import { createClient } from 'redis'
-import { readServerEnv } from '../env'
 
-/** 登录／注册限流使用 Redis；用户与会话仍由 PostgreSQL 保存。 */
-const redisGlobal = globalThis as typeof globalThis & {
-  poolAuthRedis?: ReturnType<typeof createClient>
-  poolAuthRedisConnecting?: Promise<unknown>
-}
-
-export const authRedis =
-  redisGlobal.poolAuthRedis ??
-  createClient({
-    url: readServerEnv().REDIS_URL,
-    disableOfflineQueue: true,
-    socket: { connectTimeout: 3000, reconnectStrategy: false },
-  })
-if (!redisGlobal.poolAuthRedis) {
-  authRedis.on('error', () => console.error('[auth] Redis 连接不可用'))
-  redisGlobal.poolAuthRedis = authRedis
-}
+import { redis as authRedis, getRedis } from '../redis'
+export { authRedis }
 
 /** 固定窗口内的计数与过期设置在一次 Lua 调用中原子执行。 */
 const consumeScript = `
@@ -38,12 +21,7 @@ export class AuthLimiterUnavailable extends Error {
 export const authRateLimitStorage = {
   async consume(key: string, rule: { window: number; max: number }) {
     try {
-      if (!authRedis.isReady) {
-        redisGlobal.poolAuthRedisConnecting ??= authRedis.connect().finally(() => {
-          redisGlobal.poolAuthRedisConnecting = undefined
-        })
-        await redisGlobal.poolAuthRedisConnecting
-      }
+      await getRedis()
       const hashedKey = createHash('sha256').update(key).digest('hex')
       const [count, ttl] = (await authRedis.eval(consumeScript, {
         keys: [`${process.env.POOL_AUTH_RATE_NAMESPACE || 'pool:auth:rate'}:${hashedKey}`],
