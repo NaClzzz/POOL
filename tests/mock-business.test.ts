@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { api, fillLikes, generateText, getDatabase, resetDemo, setScenario } from '@/mocks/api'
+import {
+  api,
+  fillLikes,
+  generateText,
+  getDatabase,
+  resetDemo,
+  setScenario,
+  setMockUser,
+} from '@/mocks/api'
 import { catalog, DEMO_EMAIL, DEMO_ROOM_PASSWORD } from '@/mocks/fixtures'
 import { MockRoomSession } from '@/mocks/room-session'
 import { trackKey, type RoomSnapshot } from '@/contracts/domain'
@@ -8,8 +16,7 @@ const sessions: MockRoomSession[] = []
 
 beforeEach(async () => {
   resetDemo()
-  api.logout()
-  await api.login({ email: DEMO_EMAIL, password: 'pool-demo' })
+  setMockUser({ id: DEMO_EMAIL, email: DEMO_EMAIL, name: '知更' })
 })
 
 afterEach(() => {
@@ -20,25 +27,21 @@ afterEach(() => {
 })
 
 describe('喜欢列表与导入的一致性', () => {
-  it('模拟登录与业务持久化不会保存输入密码', async () => {
+  it('mock 只使用桥接的用户主键，不持久化认证会话或密码', async () => {
     const local = new Map<string, string>()
-    const tab = new Map<string, string>()
     vi.stubGlobal('window', {
       localStorage: {
         getItem: (key: string) => local.get(key) ?? null,
         setItem: (key: string, value: string) => local.set(key, value),
       },
     })
-    vi.stubGlobal('sessionStorage', {
-      getItem: (key: string) => tab.get(key) ?? null,
-      setItem: (key: string, value: string) => tab.set(key, value),
-    })
-    await api.login({ email: 'new@pool.local', password: 'do-not-store-this-password' })
+    setMockUser({ id: 'stable-user-id', email: 'new@pool.local', name: '新用户' })
     await api.addLike(catalog[0])
-    const saved = [...local.values(), ...tab.values()].join('')
-    expect(saved).toContain('new@pool.local')
-    expect(saved).not.toContain('do-not-store-this-password')
+    const saved = [...local.values()].join('')
+    expect(saved).toContain('stable-user-id')
+    expect(saved).not.toContain('new@pool.local')
     expect(saved).not.toContain('"password"')
+    expect(saved).not.toContain('"session"')
   })
 
   it('重复收藏不重复写入或更新添加时间', async () => {
@@ -78,10 +81,10 @@ describe('喜欢列表与导入的一致性', () => {
   })
 
   it('登录账号之间的喜欢数据相互隔离', async () => {
-    await api.login({ email: 'other@pool.local', password: 'pool-demo' })
+    setMockUser({ id: 'other-user-id', email: 'other@pool.local', name: '其他用户' })
     expect(await api.likes()).toHaveLength(0)
     await api.addLike(catalog[20])
-    await api.login({ email: DEMO_EMAIL, password: 'pool-demo' })
+    setMockUser({ id: DEMO_EMAIL, email: DEMO_EMAIL, name: '知更' })
     expect(await api.likes()).toHaveLength(12)
   })
 })

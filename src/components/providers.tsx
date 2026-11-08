@@ -1,7 +1,7 @@
 'use client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useEffect, useState, type ReactNode } from 'react'
-import { useSession } from '@/stores/session'
+import { AccountSessionProvider } from '@/features/auth/session-provider'
 import { usePlayer } from '@/stores/player'
 import { PersonalAudio } from '@/features/player/audio'
 
@@ -17,14 +17,15 @@ export function Providers({ children }: { children: ReactNode }) {
       }),
   )
   useEffect(() => {
-    useSession.getState().restore()
     const volume = localStorage.getItem('pool:prototype:v1:volume')
     if (volume) usePlayer.setState({ volume: Number(volume) })
   }, [])
   return (
     <QueryClientProvider client={client}>
-      {children}
-      <PersonalAudio />
+      <AccountSessionProvider>
+        {children}
+        <PersonalAudio />
+      </AccountSessionProvider>
     </QueryClientProvider>
   )
 }

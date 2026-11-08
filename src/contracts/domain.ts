@@ -13,8 +13,6 @@ export type Track = {
   extra: Record<string, unknown> | null
 }
 
-/** 用户演示会话，不包含密码或真实认证凭据。 */
-export type DemoUser = { id: string; email: string; name: string }
 /** 收藏时保存的歌曲快照与添加时间。 */
 export type LikedTrack = Track & { addedAt: string }
 /** 大厅及归档使用的安全房间摘要。 */

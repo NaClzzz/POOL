@@ -3,16 +3,17 @@ import styles from '@/features/settings/settings-page.module.css'
 import sharedStyles from '@/components/presentation.module.css'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import { Check, LogOut, RotateCcw, Volume2 } from 'lucide-react'
 import { useSession } from '@/stores/session'
 import { usePlayer } from '@/stores/player'
-import { api, fillLikes, getDatabase, resetDemo, setScenario } from '@/mocks/api'
+import { fillLikes, getDatabase, resetDemo, setScenario } from '@/mocks/api'
 import type { DemoScenario } from '@/contracts/domain'
 import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/page-header'
 import { Slider } from '@/components/ui/slider'
+import { useLogout } from '@/features/auth/use-logout'
+import { AccountActions } from '@/features/auth/account-actions'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,7 +26,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 
-/** 本地偏好、可重复演示场景与账号退出，操作不连接后端。 */
+/** 本地偏好、可重复演示场景与账号退出，真实账号退出连接认证服务，其余业务仍为演示。 */
 export function SettingsPage() {
   const user = useSession((s) => s.user!)
   const volume = usePlayer((s) => s.volume)
@@ -34,7 +35,7 @@ export function SettingsPage() {
   const [notice, setNotice] = useState('')
   const [resetOpen, setResetOpen] = useState(false)
   const client = useQueryClient()
-  const router = useRouter()
+  const { logout, pending, error: logoutError } = useLogout()
   /** 场景改变后失效查询，但不退出模拟会话。 */
   const selectScenario = (value: DemoScenario) => {
     setScenario(value)
@@ -51,14 +52,6 @@ export function SettingsPage() {
     setNotice('演示数据已重置，可以重新开始')
     setResetOpen(false)
   }
-  /** 账号退出同时停止音频及清除私有缓存。 */
-  const logout = () => {
-    api.logout()
-    useSession.getState().setUser(null)
-    usePlayer.getState().reset()
-    client.clear()
-    router.replace('/login')
-  }
   const scenarios: [DemoScenario, string, string][] = [
     ['normal', '正常', '流畅地体验完整流程'],
     ['slow', '慢加载', '查看加载及提交中的状态'],
@@ -69,6 +62,11 @@ export function SettingsPage() {
   return (
     <div className={styles.settingsPage}>
       <PageHeader name="Settings" title="设置" />
+      {logoutError && (
+        <p role="alert" className={sharedStyles.inlineError}>
+          {logoutError}
+        </p>
+      )}
       <section className={styles.settingsSection}>
         <div className={styles.settingsSectionHeading}>
           <h2 className={styles.sectionTitle}>我的账号</h2>
@@ -81,11 +79,12 @@ export function SettingsPage() {
             <h3 className={styles.accountName}>{user.name}</h3>
             <p className={styles.accountEmail}>{user.email}</p>
           </div>
-          <Button variant="outline" onClick={logout}>
+          <Button variant="outline" onClick={() => void logout()} disabled={pending}>
             <LogOut />
             退出登录
           </Button>
         </div>
+        <AccountActions />
       </section>
       <section className={styles.settingsSection}>
         <div className={styles.settingsSectionHeading}>

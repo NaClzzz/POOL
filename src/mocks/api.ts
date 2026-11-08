@@ -2,7 +2,6 @@ import { z } from 'zod'
 import {
   catalog,
   createSeed,
-  DEMO_EMAIL,
   DEMO_ROOM_PASSWORD,
   makeTracks,
   analysisText,
@@ -13,15 +12,14 @@ import {
   type ApiResult,
   type DemoDatabase,
   type DemoScenario,
-  type DemoUser,
   type Room,
   type Track,
 } from '@/contracts/domain'
+import type { AccountUser } from '@/contracts/auth'
 
 const DATABASE_KEY = 'pool:prototype:v1:data'
-const SESSION_KEY = 'pool:prototype:v1:session'
 let database: DemoDatabase | null = null
-let session: DemoUser | null = null
+let session: AccountUser | null = null
 let requestNumber = 0
 let generatingCount = 0
 const running = new Set<string>()
@@ -81,26 +79,23 @@ export function saveDatabase() {
     window.localStorage.setItem(DATABASE_KEY, JSON.stringify(getDatabase()))
 }
 
-/** 恢复当前标签页的演示会话；不读取密码。 */
-export function getSession(): DemoUser | null {
-  if (typeof window !== 'undefined') {
-    const saved = sessionStorage.getItem(SESSION_KEY)
-    session = saved ? (JSON.parse(saved) as DemoUser) : null
-  }
-  return session
+/** 仅桥接真实会话的安全资料给尚未接后端的 mock 业务，不持久化认证身份。 */
+export function setMockUser(user: AccountUser | null) {
+  session = user
 }
 
-/** 所有用户级 mock 操作统一在入口取得当前身份。 */
-export function requireUser(): DemoUser {
-  const user = getSession()
-  if (!user) throw new ApiError('UNAUTHENTICATED', '请先登录', 401)
-  return user
+/** mock 用户级操作读取当前桥接身份；这不是服务端鉴权入口。 */
+export function requireUser(): AccountUser {
+  if (!session) throw new ApiError('UNAUTHENTICATED', '请先登录', 401)
+  return session
 }
 
 /** 执行统一异步请求并解包标准成功响应，后续可替换成 HTTP transport。 */
 async function request<T>(operation: () => T, signal?: AbortSignal): Promise<T> {
+  const userId = session?.id
   const scenario = getDatabase().scenario
   await wait(process.env.NODE_ENV === 'test' ? 0 : scenario === 'slow' ? 1500 : 240, signal)
+  if (userId !== session?.id) throw new DOMException('账号已切换', 'AbortError')
   if (scenario === 'offline')
     throw new ApiError('UPSTREAM_UNAVAILABLE', '暂时无法连接音乐服务，请稍后重试', 502)
   if (scenario === 'limited')
@@ -113,34 +108,8 @@ async function request<T>(operation: () => T, signal?: AbortSignal): Promise<T> 
   return response.data
 }
 
-/** 校验演示登录输入；仅模拟表单通过后的会话，不实现真实账号认证。 */
-const credentialsSchema = z.object({
-  email: z.email('请输入有效邮箱'),
-  password: z.string().min(8, '密码至少 8 位'),
-  name: z.string().max(30).optional(),
-})
-
-/** 保证所有页面操作经过统一业务服务，而不是操作页面私有假数据。 */
+/** 尚未接入真实接口的业务服务；账号认证由 Better Auth 独立负责。 */
 export const api = {
-  /** 建立模拟会话，不存储或验证真实密码。 */
-  async login(input: { email: string; password: string; name?: string }) {
-    const result = credentialsSchema.safeParse(input)
-    if (!result.success) throw new ApiError('INVALID_INPUT', result.error.issues[0].message)
-    await wait(process.env.NODE_ENV === 'test' ? 0 : 300)
-    const email = result.data.email.toLowerCase()
-    session = {
-      id: email,
-      email,
-      name: result.data.name?.trim() || (email === DEMO_EMAIL ? '知更' : email.split('@')[0]),
-    }
-    if (typeof window !== 'undefined') sessionStorage.setItem(SESSION_KEY, JSON.stringify(session))
-    return session
-  },
-  /** 清除本标签页会话，不清除其他账号数据。 */
-  logout() {
-    session = null
-    if (typeof window !== 'undefined') sessionStorage.removeItem(SESSION_KEY)
-  },
   /** 获取按关键词和音源筛选的统一曲目。 */
   search(source: string, q = '', signal?: AbortSignal) {
     return request(() => {
@@ -402,7 +371,7 @@ export function fillLikes() {
   }))
   saveDatabase()
 }
-/** 重置所有演示业务资料，保留当前模拟登录以便重复演示。 */
+/** 重置所有演示业务资料，保留当前真实账号的界面身份以便重复演示。 */
 export function resetDemo() {
   database = createSeed()
   generatingCount = 0

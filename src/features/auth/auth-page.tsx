@@ -7,13 +7,13 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { ArrowRight, LoaderCircle } from 'lucide-react'
-import { api } from '@/mocks/api'
+import { authClient, authErrorMessage } from '@/lib/auth-client'
+import { authReturnTo } from '@/lib/auth-redirect'
 import { useSession } from '@/stores/session'
-import { DEMO_EMAIL } from '@/mocks/fixtures'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
-/** 演示认证表单，不保存密码，也不冒充真实账号验证。 */
+/** 邮箱密码注册／登录表单；密码仅在提交时发送给同域认证入口。 */
 type AuthFields = { email: string; password: string; name: string }
 
 /** 登录注册共用的简洁邮箱表单。 */
@@ -26,33 +26,33 @@ export function AuthPage({ registerMode = false }: { registerMode?: boolean }) {
     register,
     handleSubmit,
     setError,
-    setValue,
     formState: { errors, isSubmitting },
   } = useForm<AuthFields>({ defaultValues: { email: '', password: '', name: '' } })
-  const target = params.get('returnTo') || '/search'
-  const returnTo = target.startsWith('/') && !target.startsWith('//') ? target : '/search'
+  const returnTo = authReturnTo(params.get('returnTo'))
   useEffect(() => {
     if (ready && user) router.replace(returnTo)
   }, [ready, user, returnTo, router])
-  /** 在表单入口处理模拟服务错误并建立会话。 */
+  /** 表单复用认证库的原生协议，注册与登录使用不同端点。 */
   const submit = async (values: AuthFields) => {
     try {
-      const session = await api.login({
-        email: values.email,
-        password: values.password,
-        name: registerMode ? values.name : undefined,
-      })
-      useSession.getState().setUser(session)
+      const credentials = { email: values.email.trim(), password: values.password }
+      const result = registerMode
+        ? await authClient.signUp.email({ ...credentials, name: values.name.trim() })
+        : await authClient.signIn.email(credentials)
+      if (result.error) {
+        setError('root', { message: authErrorMessage(result.error) })
+        return
+      }
+      const sessionResult = await authClient.getSession({ query: { disableCookieCache: true } })
+      if (sessionResult.error || !sessionResult.data) {
+        setError('root', { message: '无法确认登录会话，请重试' })
+        return
+      }
       router.replace(returnTo)
-    } catch (error) {
-      setError('root', { message: (error as Error).message })
+      router.refresh()
+    } catch {
+      setError('root', { message: '无法连接账号服务，请稍后重试' })
     }
-  }
-  /** 填入非敏感演示账号，用户仍可查看和修改输入。 */
-  const demo = () => {
-    setValue('email', DEMO_EMAIL)
-    setValue('password', 'pool-demo')
-    void handleSubmit(submit)()
   }
   return (
     <main className={styles.authPage}>
@@ -106,6 +106,7 @@ export function AuthPage({ registerMode = false }: { registerMode?: boolean }) {
                 {...register('password', {
                   required: '请输入密码',
                   minLength: { value: 8, message: '密码至少 8 位' },
+                  maxLength: { value: 128, message: '密码最多 128 位' },
                 })}
               />
               {errors.password && (
@@ -113,33 +114,26 @@ export function AuthPage({ registerMode = false }: { registerMode?: boolean }) {
               )}
             </label>
             {errors.root && <p className={sharedStyles.inlineError}>{errors.root.message}</p>}
-            <Button type="submit" size="lg" className="mt-3 w-full" disabled={isSubmitting}>
+            <Button
+              type="submit"
+              size="lg"
+              className="mt-3 w-full"
+              disabled={isSubmitting || !ready}
+            >
               {isSubmitting ? <LoaderCircle className="animate-spin" /> : null}
               {registerMode ? '创建账号' : '登录'}
               <ArrowRight />
             </Button>
           </form>
-          {!registerMode && (
-            <Button
-              variant="outline"
-              size="lg"
-              className="mt-3 w-full"
-              disabled={isSubmitting}
-              onClick={demo}
-            >
-              使用演示账号
-            </Button>
-          )}
           <p className={styles.authSwitch}>
             {registerMode ? '已有账号？' : '还没有账号？'}
             <Link
               className={cn(styles.authSwitchLink, sharedStyles.link)}
-              href={registerMode ? '/login' : '/register'}
+              href={`${registerMode ? '/login' : '/register'}?returnTo=${encodeURIComponent(returnTo)}`}
             >
               {registerMode ? '去登录' : '注册'}
             </Link>
           </p>
-          <p className={styles.authDemoNote}>本地交互原型 · 无需真实账号，密码不会保存</p>
         </div>
       </section>
     </main>

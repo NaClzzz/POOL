@@ -1,18 +1,19 @@
 import { create } from 'zustand'
-import { getSession } from '@/mocks/api'
-import type { DemoUser } from '@/contracts/domain'
+import { setMockUser } from '@/mocks/api'
+import type { AccountUser } from '@/contracts/auth'
 
-/** 模拟会话的界面投影，真实认证接入时替换实现。 */
+/** Better Auth 会话的只读安全投影，不负责登录、签发或持久化身份。 */
 type SessionState = {
-  user: DemoUser | null
+  user: AccountUser | null
   ready: boolean
-  restore: () => void
-  setUser: (user: DemoUser | null) => void
+  error: string | null
 }
-/** 统一恢复身份，避免每个页面各读一份 sessionStorage。 */
-export const useSession = create<SessionState>((set) => ({
-  user: null,
-  ready: false,
-  restore: () => set({ user: getSession(), ready: true }),
-  setUser: (user) => set({ user, ready: true }),
-}))
+
+/** 兼容现有页面的选择器，会话权威来源始终为认证客户端与服务端。 */
+export const useSession = create<SessionState>(() => ({ user: null, ready: false, error: null }))
+
+/** 仅由会话同步边界或成功退出更新投影，同时隔离仍使用 mock 的业务资料。 */
+export function projectAccountSession(user: AccountUser | null, error: string | null = null) {
+  setMockUser(user)
+  useSession.setState({ user, ready: true, error })
+}
