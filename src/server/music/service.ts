@@ -1,10 +1,12 @@
 import type { MusicSource, Track } from '@/contracts/domain'
 import type { MusicAdapters } from './adapter'
-import { neteaseAdapter } from './netease'
+import { neteaseAdapter } from './adapters/netease'
 import { neteasePlaylistId } from './validation'
 import { BusinessError } from '../http/errors'
 
-const adapters: MusicAdapters = { netease: neteaseAdapter }
+const adapters: MusicAdapters = {
+  netease: neteaseAdapter,
+}
 
 /** 未接通平台显式报未支持，不能回退到模拟条目或其他平台。 */
 function adapterFor(source: MusicSource) {

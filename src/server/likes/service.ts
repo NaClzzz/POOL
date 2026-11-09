@@ -132,10 +132,11 @@ export const likesService = {
       // 加锁
       await tx.select({ id: user.id }).from(user).where(eq(user.id, userId)).for('update')
       // 删除所有收藏
-        await tx.delete(likedSongs).where(eq(likedSongs.userId, userId))
+      await tx.delete(likedSongs).where(eq(likedSongs.userId, userId))
     })
     return null
   },
+
   async importPlaylist(userId: string, url: string): Promise<ImportLikesResult> {
     const redis = await getRedis().catch(() => {
       throw new BusinessError('LIMITER_UNAVAILABLE', '导入服务暂时不可用', 503)

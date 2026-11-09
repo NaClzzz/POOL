@@ -31,7 +31,11 @@ function SortableQueueRow({
   index: number
   current: boolean
 }) {
-  const { ref, handleRef, isDragging } = useSortable({ id: trackKey(track), index, disabled })
+  const { ref, handleRef, isDragging } = useSortable({
+    id: trackKey(track),
+    index,
+    disabled: disabled ? true : { draggable: current },
+  })
   const details = (
     <>
       <img className={styles.queueCover} src={track.cover_url || '/covers/water.svg'} alt="" />
@@ -68,8 +72,8 @@ function SortableQueueRow({
         size="icon-sm"
         className={styles.dragHandle}
         aria-label={`拖拽排序 ${track.title}`}
-        title="拖拽排序"
-        disabled={disabled}
+        title={current ? '当前歌曲不能拖动' : '拖拽排序'}
+        disabled={disabled || current}
       >
         <GripVertical />
       </Button>

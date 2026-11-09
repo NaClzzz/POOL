@@ -154,6 +154,7 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
     const fromIndex = s.queue.findIndex((t) => trackKey(t) === trackKey(track))
     if (
       fromIndex < 0 ||
+      fromIndex === s.index ||
       !Number.isInteger(toIndex) ||
       toIndex < 0 ||
       toIndex >= s.queue.length ||
@@ -167,8 +168,6 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
     set({
       queue,
       index: queue.indexOf(current),
-      // 沿用旧项目：拖动当前歌曲从头播放，暂停状态保持不变。
-      ...(moved === current ? { position: 0, seekTo: 0, error: null } : {}),
     })
   },
   /** 切换模式只重排队列；当前歌曲、进度和暂停意图不变。 */
