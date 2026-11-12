@@ -4,11 +4,9 @@ import styles from '@/features/music/track-list.module.css'
 import { cn } from '@/lib/utils'
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { useVirtualizer, useWindowVirtualizer } from '@tanstack/react-virtual'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Heart, Play, Plus, AudioLines } from 'lucide-react'
-import { likesApi } from '@/lib/api-client'
+import { useLikes, useAddLike, useRemoveLike } from '@/lib/api-client'
 import { trackKey, type Track } from '@/contracts/domain'
-import { useSession } from '@/stores/session'
 import { usePlayer } from '@/stores/player'
 import { formatTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -30,22 +28,15 @@ export function TrackList({
 }) {
   const parent = useRef<HTMLDivElement>(null)
   const [scrollMargin, setScrollMargin] = useState(0)
-  const userId = useSession((s) => s.user!.id)
   const current = usePlayer((s) => s.queue[s.index])
   const playing = usePlayer((s) => s.playing)
   const play = usePlayer((s) => s.play)
-  const client = useQueryClient()
-  const likes = useQuery({
-    queryKey: ['likes', userId],
-    queryFn: ({ signal }) => likesApi.list(signal),
-    enabled: !onAdd,
-  })
+  const likes = useLikes({ enabled: !onAdd })
+  const addLike = useAddLike()
+  const removeLike = useRemoveLike()
   const likedKeys = new Set(likes.data?.map(trackKey) ?? [])
-  const mutation = useMutation({
-    mutationFn: (track: Track) =>
-      likedKeys.has(trackKey(track)) ? likesApi.remove(track) : likesApi.add(track),
-    onSuccess: () => client.invalidateQueries({ queryKey: ['likes', userId] }),
-  })
+  const mutationPending = addLike.isPending || removeLike.isPending
+  const mutationError = addLike.error || removeLike.error
   const compactVirtual = useVirtualizer({
     count: tracks.length,
     getScrollElement: () => parent.current,
@@ -63,7 +54,7 @@ export function TrackList({
     enabled: !compact && tracks.length > 50,
   })
   const virtual = compact ? compactVirtual : pageVirtual
-  const hasError = !!mutation.error
+  const hasError = !!mutationError
   useLayoutEffect(() => {
     if (compact || tracks.length <= 50) return
     /** 列表起点随页头、错误反馈和视口变化重新测量，行定位扣除页面偏移。 */
@@ -136,9 +127,14 @@ export function TrackList({
             aria-label={
               likedKeys.has(trackKey(track)) ? `取消喜欢 ${track.title}` : `喜欢 ${track.title}`
             }
-            onClick={() => mutation.mutate(track)}
+            onClick={() => {
+              addLike.reset()
+              removeLike.reset()
+              if (likedKeys.has(trackKey(track))) removeLike.mutate(track)
+              else addLike.mutate(track)
+            }}
             disabled={
-              mutation.isPending || (likes.data?.length === 500 && !likedKeys.has(trackKey(track)))
+              mutationPending || (likes.data?.length === 500 && !likedKeys.has(trackKey(track)))
             }
             title={
               likes.data?.length === 500 && !likedKeys.has(trackKey(track))
@@ -166,8 +162,8 @@ export function TrackList({
         } as CSSProperties
       }
     >
-      {mutation.error && (
-        <p className={cn(sharedStyles.inlineError, 'px-4')}>{mutation.error.message}</p>
+      {mutationError && (
+        <p className={cn(sharedStyles.inlineError, 'px-4')}>{mutationError.message}</p>
       )}
       <div className={cn(styles.trackHeading, compact && styles.compact)}>
         <span>#</span>

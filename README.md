@@ -50,6 +50,8 @@ Compose 固定官方镜像摘要。拉取受网络限制时通过 .env 的 POSTG
 
 ## 数据与替换边界
 
+浏览器请求分为 src/lib/http.ts（Axios 实例、/api 前缀和响应拦截器）与 src/lib/api-client.ts（原始业务接口及真实音乐／喜欢 Query hooks），不再额外包装 get／post／delete。普通业务 JSON 和网易云上游调用均使用独立 Axios 实例；Better Auth 使用官方客户端，音频播放使用 Audio，媒体流代理保留原生 fetch。浏览器请求支持取消，网易云 JSON 上游维持 15 秒总期限。
+
 - src/server/auth/：认证核心、HTTP 入口、页面会话校验和 Redis 原子限流；核心可供后续 Socket 服务复用。
 - src/server/db/、drizzle/：认证 schema、连接池与版本化迁移，目前有认证四张表和 liked_songs；没有内部歌曲 ID 或独立歌曲表。
 - src/server/music/、src/server/likes/：统一音乐适配、Redis 缓存与限流、收藏事务及导入；当前只接网易云匿名服务。

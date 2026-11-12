@@ -19,6 +19,32 @@ const fixture = createServer((request, response) => {
   const url = new URL(request.url!, 'http://localhost')
   hits.push(url.pathname + url.search)
   response.setHeader('Content-Type', 'application/json')
+  if (url.pathname === '/cloudsearch') {
+    const q = url.searchParams.get('keywords')
+    if (q === 'malformed-json') {
+      response.end('{invalid')
+      return
+    }
+    if (q === 'http429') {
+      response.statusCode = 429
+      response.end(JSON.stringify({ code: 200 }))
+      return
+    }
+    if (q === 'http500') {
+      response.statusCode = 500
+      response.end(JSON.stringify({ code: 200 }))
+      return
+    }
+    if (q === 'disconnect') {
+      request.socket.destroy()
+      return
+    }
+    if (q === 'timeout') {
+      response.flushHeaders()
+      response.write('{')
+      return
+    }
+  }
   // 保持一个短暂窗口，让并发导入和缓存合并测试覆盖真实竞争。
   setTimeout(() => {
     let result: unknown
@@ -214,7 +240,29 @@ describe('统一音乐服务、缓存与真实收藏事务', { concurrency: fals
     assert.deepEqual((await response.json()).data, { lrc: null, translationLrc: null })
   })
 
-  it('播放按统一引用解析，不启用解锁；试听和无地址明确不可播放', async () => {
+  it('Axios 上游保留 HTTP 错误分类，非法 JSON 与连接中断独立映射', async () => {
+    for (const [q, code] of [
+      ['http429', 'UPSTREAM_RATE_LIMITED'],
+      ['http500', 'UPSTREAM_UNAVAILABLE'],
+      ['malformed-json', 'UPSTREAM_INVALID_RESPONSE'],
+      ['disconnect', 'UPSTREAM_UNAVAILABLE'],
+    ]) {
+      const response = await musicQuery(req(`/api/music/search?source=netease&q=${q}`), 'search')
+      assert.equal(response.status, 502)
+      assert.equal((await response.json()).error.code, code)
+    }
+  })
+
+  it('响应体未完成时也受 15 秒总期限约束并返回 504', async () => {
+    const startedAt = Date.now()
+    const response = await musicQuery(req('/api/music/search?source=netease&q=timeout'), 'search')
+    assert.equal(response.status, 504)
+    assert.equal((await response.json()).error.code, 'UPSTREAM_TIMEOUT')
+    assert.ok(Date.now() - startedAt >= 14500)
+    assert.ok(Date.now() - startedAt < 20000)
+  })
+
+  it('播放按统一引用解析并保留当前上游参数，试听和无地址明确不可播放', async () => {
     const result = await musicPlayback(
       req('/api/music/playback', { source: 'netease', source_id: '100001' }),
     )
@@ -224,9 +272,7 @@ describe('统一音乐服务、缓存与真实收藏事务', { concurrency: fals
     assert.equal(playback.duration_ms, 183456)
     assert.match(playback.url, /^https:/)
     assert.ok(playback.expires_at)
-    assert.ok(
-      hits.some((path) => path.startsWith('/song/url/v1') && path.includes('unblock=false')),
-    )
+    assert.ok(hits.some((path) => path.startsWith('/song/url/v1') && path.includes('unblock=true')))
     for (const id of ['100002', '100003']) {
       const response = await musicPlayback(
         req('/api/music/playback', { source: 'netease', source_id: id }),

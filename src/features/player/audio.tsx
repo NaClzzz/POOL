@@ -2,7 +2,8 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { usePlayer } from '@/stores/player'
 import { trackKey, type Playback, type Track } from '@/contracts/domain'
-import { musicApi, HttpError } from '@/lib/api-client'
+import { musicApi } from '@/lib/api-client'
+import { HttpError } from '@/lib/http'
 
 /** 将统一条目映射到本地原创演示资源，不使用平台真实地址。 */
 export function audioUrl(track: Track) {

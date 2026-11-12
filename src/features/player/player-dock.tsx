@@ -16,10 +16,8 @@ import {
   Shuffle,
   ListOrdered,
 } from 'lucide-react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { usePlayer } from '@/stores/player'
-import { useSession } from '@/stores/session'
-import { likesApi } from '@/lib/api-client'
+import { useLikes, useAddLike, useRemoveLike } from '@/lib/api-client'
 import { trackKey } from '@/contracts/domain'
 import { formatTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -30,20 +28,12 @@ import { SortableQueue } from '@/features/music/sortable-queue'
 /** 全局个人播放器；房间加入后隐藏但保留暂停的个人队列。 */
 export function PersonalPlayerDock() {
   const state = usePlayer()
-  const user = useSession((s) => s.user)
   const [queueOpen, setQueueOpen] = useState(false)
-  const client = useQueryClient()
-  const likes = useQuery({
-    queryKey: ['likes', user?.id],
-    queryFn: ({ signal }) => likesApi.list(signal),
-    enabled: !!user,
-  })
+  const likes = useLikes()
+  const addLike = useAddLike()
+  const removeLike = useRemoveLike()
   const track = state.queue[state.index]
   const liked = !!track && likes.data?.some((t) => trackKey(t) === trackKey(track))
-  const like = useMutation({
-    mutationFn: () => (liked ? likesApi.remove(track!) : likesApi.add(track!)),
-    onSuccess: () => client.invalidateQueries({ queryKey: ['likes', user?.id] }),
-  })
   if (state.roomActive) return null
   return (
     <>
@@ -62,9 +52,7 @@ export function PersonalPlayerDock() {
                 {track?.title ?? '未选择歌曲'}
               </p>
               <p className={cn(styles.trackAuthor, 'mt-1 truncate text-xs text-muted-foreground')}>
-                {state.error ||
-                  (state.loading ? '正在解析播放资源…' : track?.author) ||
-                  '选择歌曲后播放'}
+                {state.error || (state.loading ? '加载中…' : track?.author) || '选择歌曲后播放'}
               </p>
             </div>
             {track && (
@@ -72,8 +60,15 @@ export function PersonalPlayerDock() {
                 variant="ghost"
                 size="icon"
                 aria-label={liked ? '取消喜欢' : '加入喜欢'}
-                onClick={() => like.mutate()}
-                disabled={like.isPending || (likes.data?.length === 500 && !liked)}
+                onClick={() => {
+                  if (liked) removeLike.mutate(track)
+                  else addLike.mutate(track)
+                }}
+                disabled={
+                  addLike.isPending ||
+                  removeLike.isPending ||
+                  (likes.data?.length === 500 && !liked)
+                }
                 title={
                   likes.data?.length === 500 && !liked ? '喜欢列表已满，最多 500 首' : undefined
                 }

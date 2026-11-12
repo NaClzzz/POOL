@@ -2,11 +2,11 @@
 import { cn } from '@/lib/utils'
 import styles from '@/features/music/search-page.module.css'
 import sharedStyles from '@/components/presentation.module.css'
-import { useInfiniteQuery } from '@tanstack/react-query'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useState, type FormEvent } from 'react'
 import { Search } from 'lucide-react'
-import { musicApi, HttpError } from '@/lib/api-client'
+import { useMusicSearch } from '@/lib/api-client'
+import { HttpError } from '@/lib/http'
 import type { MusicSource } from '@/contracts/domain'
 import { TrackList } from './track-list'
 import { Empty, ErrorState, Loading } from '@/components/feedback'
@@ -21,13 +21,7 @@ export function SearchPage() {
   const source: MusicSource = params.get('source') === 'bilibili' ? 'bilibili' : 'netease'
   const q = params.get('q') || ''
   const [input, setInput] = useState(q)
-  const query = useInfiniteQuery({
-    queryKey: ['music', 'search', source, q],
-    initialPageParam: 0,
-    queryFn: ({ signal, pageParam }) => musicApi.search(source, q, pageParam, 30, signal),
-    getNextPageParam: (page) => (page.hasMore ? page.offset + page.limit : undefined),
-    enabled: !!q,
-  })
+  const query = useMusicSearch(source, q)
   const tracks = query.data?.pages.flatMap((page) => page.items) ?? []
   const total = query.data?.pages[0]?.total
   /** 将提交过的搜索条件写进 URL，输入中不请求服务。 */

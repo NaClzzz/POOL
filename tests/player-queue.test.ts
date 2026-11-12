@@ -89,13 +89,13 @@ describe('个人播放队列与模式切换', () => {
     expect(list).toEqual(catalog.slice(0, 5))
   })
 
-  it.each([true, false])('拖动当前歌曲从头开始并保留 playing=%s', (playing) => {
+  it.each([true, false])('当前歌曲禁止拖动，保留进度和 playing=%s', (playing) => {
     const list = catalog.slice(0, 4)
     usePlayer.getState().play(list[0], list)
     usePlayer.setState({ playing, position: 12, seekTo: null })
     usePlayer.getState().move(list[0], 3)
-    expect(usePlayer.getState()).toMatchObject({ index: 3, position: 0, seekTo: 0, playing })
-    expect(usePlayer.getState().queue[3]).toBe(list[0])
+    expect(usePlayer.getState()).toMatchObject({ index: 0, position: 12, seekTo: null, playing })
+    expect(usePlayer.getState().queue).toEqual(list)
   })
 
   it('切换模式保留暂停状态，删除的歌曲不会在恢复顺序时重新出现', () => {

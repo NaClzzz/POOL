@@ -1,9 +1,18 @@
 import { z } from 'zod'
+import axios, { type AxiosResponse } from 'axios'
 import type { Track } from '@/contracts/domain'
 import type { MusicAdapter } from '../adapter'
 import { BusinessError } from '../../http/errors'
 import { readServerEnv } from '../../env'
 import { musicCache, withMusicBudget } from '../runtime'
+
+/** 网易云 JSON 专用实例，不继承 POOL 认证信息，也不使用环境变量 HTTP 代理。 */
+const neteaseHttp = axios.create({
+  responseType: 'json',
+  transitional: { silentJSONParsing: false },
+  validateStatus: null,
+  proxy: false,
+})
 
 /** 上游歌曲最小结构；可缺资料保留 null，身份与已知时长必须有效。 */
 const songSchema = z.object({
@@ -59,23 +68,30 @@ async function upstream<T>(
   return withMusicBudget(async () => {
     const url = new URL(path, readServerEnv().MUSIC_API_BASE_URL)
     url.search = new URLSearchParams({ ...params, noCookie: 'true' }).toString()
-    let response: Response, raw: unknown
+    const signal = AbortSignal.timeout(15000)
+    let response: AxiosResponse<unknown>
     try {
-      response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(15000) })
-      raw = await response.json()
+      response = await neteaseHttp.get<unknown>(url.toString(), { signal })
     } catch (error) {
+      const timeout = signal.aborted && signal.reason?.name === 'TimeoutError'
+      if (axios.isAxiosError(error) && error.code === 'ERR_BAD_RESPONSE')
+        throw new BusinessError('UPSTREAM_INVALID_RESPONSE', '网易云返回的数据格式异常', 502)
       throw new BusinessError(
-        error instanceof Error && error.name === 'TimeoutError'
-          ? 'UPSTREAM_TIMEOUT'
-          : 'UPSTREAM_UNAVAILABLE',
+        timeout ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
         '无法连接网易云音源服务，请稍后重试',
-        error instanceof Error && error.name === 'TimeoutError' ? 504 : 502,
+        timeout ? 504 : 502,
       )
     }
+    const raw = response.data
     const envelope = z.object({ code: z.number() }).safeParse(raw)
     if (response.status === 429 || (envelope.success && [429, 405].includes(envelope.data.code)))
       throw new BusinessError('UPSTREAM_RATE_LIMITED', '网易云音源请求受限，请稍后重试', 502, 5)
-    if (!response.ok || !envelope.success || envelope.data.code !== 200)
+    if (
+      response.status < 200 ||
+      response.status >= 300 ||
+      !envelope.success ||
+      envelope.data.code !== 200
+    )
       throw new BusinessError('UPSTREAM_UNAVAILABLE', '网易云暂时无法提供该资源', 502)
     const result = schema.safeParse(raw)
     if (!result.success)

@@ -1,5 +1,6 @@
 minimumReleaseAgeExclude:
   - lucide-react@1.70.0
+  - axios@1.21.1
 
 allowBuilds:
   esbuild: true

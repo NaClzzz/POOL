@@ -4,10 +4,8 @@ import { cn } from '@/lib/utils'
 import styles from '@/features/likes/likes-page.module.css'
 import sharedStyles from '@/components/presentation.module.css'
 import { useState, type FormEvent } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, Download, Sparkles, Link2, CheckCircle2, LoaderCircle } from 'lucide-react'
-import { likesApi } from '@/lib/api-client'
-import { useSession } from '@/stores/session'
+import { useLikes, useImportLikes, useClearLikes } from '@/lib/api-client'
 import { usePlayer } from '@/stores/player'
 import { Button } from '@/components/ui/button'
 import {
@@ -38,33 +36,18 @@ import { PageHeader } from '@/components/page-header'
 
 /** 用户喜欢页面，以完整查询统一驱动列表和容量展示。 */
 export function LikesPage() {
-  const userId = useSession((s) => s.user!.id)
-  const client = useQueryClient()
   const play = usePlayer((s) => s.play)
   const [importOpen, setImportOpen] = useState(false)
   const [analysisOpen, setAnalysisOpen] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
   const [url, setUrl] = useState('')
-  const query = useQuery({
-    queryKey: ['likes', userId],
-    queryFn: ({ signal }) => likesApi.list(signal),
-  })
-  const importMutation = useMutation({
-    mutationFn: () => likesApi.import(url),
-    onSuccess: () => client.invalidateQueries({ queryKey: ['likes', userId] }),
-  })
-  /** 确认后清空收藏，成功关闭弹窗并刷新当前用户的喜欢查询。 */
-  const clearMutation = useMutation({
-    mutationFn: () => likesApi.clear(),
-    onSuccess: () => {
-      setClearOpen(false)
-      return client.invalidateQueries({ queryKey: ['likes', userId] })
-    },
-  })
+  const query = useLikes()
+  const importMutation = useImportLikes()
+  const clearMutation = useClearLikes({ onSuccess: () => setClearOpen(false) })
   /** 导入只提交链接，不从页面传递容量或目标用户。 */
   const importPlaylist = (event: FormEvent) => {
     event.preventDefault()
-    importMutation.mutate()
+    importMutation.mutate(url)
   }
   return (
     <>
@@ -78,7 +61,10 @@ export function LikesPage() {
             播放全部
           </Button>
           <Dialog open={importOpen} onOpenChange={setImportOpen}>
-            <DialogTrigger render={<Button variant="outline" />} onClick={() => importMutation.reset()}>
+            <DialogTrigger
+              render={<Button variant="outline" />}
+              onClick={() => importMutation.reset()}
+            >
               <Download />
               导入歌单
             </DialogTrigger>
@@ -107,7 +93,11 @@ export function LikesPage() {
                 <button
                   className={cn(sharedStyles.sampleLink, sharedStyles.action)}
                   type="button"
-                  onClick={() => setUrl('https://music.163.com/playlist?id=817675326&uct2=U2FsdGVkX1/x6bOmCDNpq+JTx0yDCJS1dkLYt0GGdWI=')}
+                  onClick={() =>
+                    setUrl(
+                      'https://music.163.com/playlist?id=817675326&uct2=U2FsdGVkX1/x6bOmCDNpq+JTx0yDCJS1dkLYt0GGdWI=',
+                    )
+                  }
                 >
                   导入作者的歌单 ( ? )
                 </button>
@@ -120,8 +110,8 @@ export function LikesPage() {
                     <div>
                       <strong>已新增 {importMutation.data.added} 首</strong>
                       <p className={styles.importDetails}>
-                        重复 {importMutation.data.duplicates} 首 · 失败 {importMutation.data.failed} 首 ·
-                        剩余容量 {importMutation.data.remainingCapacity} 首
+                        重复 {importMutation.data.duplicates} 首 · 失败 {importMutation.data.failed}{' '}
+                        首 · 剩余容量 {importMutation.data.remainingCapacity} 首
                         {importMutation.data.capacitySkipped !== null &&
                           importMutation.data.capacitySkipped > 0 &&
                           ` · 容量跳过 ${importMutation.data.capacitySkipped} 首`}
@@ -134,8 +124,16 @@ export function LikesPage() {
                     </div>
                   </div>
                 )}
-                <Button type="submit" className="mt-5 w-full" disabled={importMutation.isPending || !url}>
-                  {importMutation.isPending ? <LoaderCircle className="animate-spin" /> : <Download />}
+                <Button
+                  type="submit"
+                  className="mt-5 w-full"
+                  disabled={importMutation.isPending || !url}
+                >
+                  {importMutation.isPending ? (
+                    <LoaderCircle className="animate-spin" />
+                  ) : (
+                    <Download />
+                  )}
                   开始导入
                 </Button>
               </form>
@@ -167,7 +165,9 @@ export function LikesPage() {
               <Button
                 variant="link"
                 className="h-auto p-0 text-xs text-muted-foreground hover:no-underline"
-                disabled={!query.data?.length || importMutation.isPending || clearMutation.isPending}
+                disabled={
+                  !query.data?.length || importMutation.isPending || clearMutation.isPending
+                }
               />
             }
             onClick={() => clearMutation.reset()}

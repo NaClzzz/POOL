@@ -71,9 +71,12 @@ export type RoomSnapshot = {
 }
 /** 可复现的模拟接口场景。 */
 export type DemoScenario = 'normal' | 'slow' | 'offline' | 'limited' | 'ai-fail'
-/** 普通模拟接口的统一结果形状。 */
+/** 普通业务成功响应，Axios 接口方法据此取得准确的业务数据类型。 */
+export type ApiSuccess<T> = { ok: true; data: T; requestId: string }
+
+/** 普通业务接口与 mock 共用的统一结果形状。 */
 export type ApiResult<T> =
-  | { ok: true; data: T; requestId: string }
+  | ApiSuccess<T>
   | { ok: false; error: { code: string; message: string }; requestId: string }
 /** 模拟数据库：只保存业务资料，不保存密码和房间实时状态。 */
 export type DemoDatabase = {
