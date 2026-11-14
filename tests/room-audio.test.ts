@@ -164,7 +164,7 @@ describe('真实房间音频控制器', () => {
     )
     expect(vi.getTimerCount()).toBeGreaterThan(0)
     const loadingTimer =
-      timers.mock.results[timers.mock.calls.findIndex((call) => call[1] === 15_000)].value
+      timers.mock.results[timers.mock.calls.findIndex((call) => call[1] === 30_000)].value
     await act(async () => root.unmount())
     expect(cancelTimer).toHaveBeenCalledWith(loadingTimer)
     await vi.advanceTimersByTimeAsync(60_000)

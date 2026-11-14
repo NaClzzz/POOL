@@ -5,7 +5,7 @@ import { useSession } from '@/stores/session'
 import { http } from './http'
 import type { CreateRoom, Room, RoomHistory } from '@/contracts/room'
 
-/** 页面与播放器共用的 POOL 音乐接口，只定义请求与业务数据读取。 */
+/** 音乐接口 */
 export const musicApi = {
   /** 搜索结果使用统一分页，查询编码及取消交给 Axios。 */
   search: async (source: MusicSource, q: string, offset = 0, limit = 30, signal?: AbortSignal) => {
@@ -42,7 +42,7 @@ export const musicApi = {
   },
 }
 
-/** 喜欢接口保留页面原有返回值，容量和权限由服务端执行。 */
+/** 喜欢接口 */
 export const likesApi = {
   /** 一次读取最多 500 首，保证搜索喜欢态不依赖已加载分页。 */
   list: async (signal?: AbortSignal) => {
@@ -81,100 +81,9 @@ export const likesApi = {
   },
 }
 
-/** 页面可追加成功后的界面动作，公共缓存刷新始终由对应 hook 先执行。 */
-type LikeSuccessOptions<TData, TVariables = void> = {
-  onSuccess?: (data: TData, variables: TVariables) => void | Promise<void>
-}
-
-/** 喜欢查询共用当前账号缓存；房间加歌等不需要收藏资料的场景可禁用。 */
-export function useLikes({ enabled = true }: { enabled?: boolean } = {}) {
-  const userId = useSession((state) => state.user?.id)
-  return useQuery({
-    queryKey: ['likes', userId],
-    queryFn: ({ signal }) => likesApi.list(signal),
-    enabled: !!userId && enabled,
-  })
-}
-
-/** 新增收藏，成功后刷新发起操作账号的查询，再执行页面成功回调。 */
-export function useAddLike(
-  options: LikeSuccessOptions<Awaited<ReturnType<typeof likesApi.add>>, Track> = {},
-) {
-  const client = useQueryClient()
-  return useMutation({
-    mutationFn: likesApi.add,
-    onMutate: () => useSession.getState().user?.id,
-    onSuccess: async (data, track, userId) => {
-      await client.invalidateQueries({ queryKey: ['likes', userId], exact: true })
-      if (useSession.getState().user?.id === userId) await options.onSuccess?.(data, track)
-    },
-  })
-}
-
-/** 取消收藏与新增共用刷新约定，不将当前页的选中曲目绑定进 hook。 */
-export function useRemoveLike(options: LikeSuccessOptions<null, Track> = {}) {
-  const client = useQueryClient()
-  return useMutation({
-    mutationFn: likesApi.remove,
-    onMutate: () => useSession.getState().user?.id,
-    onSuccess: async (data, track, userId) => {
-      await client.invalidateQueries({ queryKey: ['likes', userId], exact: true })
-      if (useSession.getState().user?.id === userId) await options.onSuccess?.(data, track)
-    },
-  })
-}
-
-/** 清空成功后先同步喜欢缓存，关闭哪个确认框由调用页面决定。 */
-export function useClearLikes(options: LikeSuccessOptions<null> = {}) {
-  const client = useQueryClient()
-  return useMutation({
-    mutationFn: () => likesApi.clear(),
-    onMutate: () => useSession.getState().user?.id,
-    onSuccess: async (data, variables, userId) => {
-      await client.invalidateQueries({ queryKey: ['likes', userId], exact: true })
-      if (useSession.getState().user?.id === userId) await options.onSuccess?.(data, variables)
-    },
-  })
-}
-
-/** 导入链接通过 mutate(url) 传入，成功刷新缓存但不擅自关闭结果弹窗。 */
-export function useImportLikes(options: LikeSuccessOptions<ImportLikesResult, string> = {}) {
-  const client = useQueryClient()
-  return useMutation({
-    mutationFn: likesApi.import,
-    onMutate: () => useSession.getState().user?.id,
-    onSuccess: async (data, url, userId) => {
-      await client.invalidateQueries({ queryKey: ['likes', userId], exact: true })
-      if (useSession.getState().user?.id === userId) await options.onSuccess?.(data, url)
-    },
-  })
-}
-
-/** 真实音乐搜索统一关键词、分页及取消规则；页面仍管理 URL 和输入草稿。 */
-export function useMusicSearch(source: MusicSource, keyword: string) {
-  const userId = useSession((state) => state.user?.id)
-  const q = keyword.trim()
-  return useInfiniteQuery({
-    queryKey: ['music', 'search', source, q],
-    initialPageParam: 0,
-    queryFn: ({ signal, pageParam }) => musicApi.search(source, q, pageParam, 30, signal),
-    getNextPageParam: (page) => (page.hasMore ? page.offset + page.limit : undefined),
-    enabled: !!userId && !!q,
-  })
-}
-/** 个人和房间共用歌词缓存，切歌取消旧查询。 */
-export function useLyrics(track: Track | null) {
-  return useQuery({
-    queryKey: ['music', 'lyrics', track?.source, track?.source_id],
-    queryFn: ({ signal }) => musicApi.lyrics(track!.source, track!.source_id, signal),
-    enabled: !!track,
-    staleTime: 60_000,
-  })
-}
-
 /** 房间 HTTP 只承载大厅、创建与本人历史，不维护实时快照。 */
 export const roomsApi = {
-  /** 大厅查询同时带回当前房主的有效房间。 */
+  /** 大厅查询 */
   async list(q: string, signal?: AbortSignal) {
     return (
       await http.get<ApiSuccess<{ rooms: Page<Room>; myRoom: Room | null }>>('/rooms', {
@@ -183,7 +92,7 @@ export const roomsApi = {
       })
     ).data.data
   },
-  /** 创建后仍需 Socket 加入成功才记入历史。 */
+  /** 创建房间 */
   async create(input: CreateRoom) {
     return (await http.post<ApiSuccess<Room>>('/rooms', input)).data.data
   },
@@ -210,6 +119,102 @@ export const roomsApi = {
     ).data.data
   },
 }
+
+/** 业务 hooks ---------- */
+
+/** 页面可追加成功后的界面动作，公共缓存刷新始终由对应 hook 先执行。 */
+type LikeSuccessOptions<TData, TVariables = void> = {
+  onSuccess?: (data: TData, variables: TVariables) => void | Promise<void>
+}
+
+/** 喜欢查询 */
+export function useLikes({ enabled = true }: { enabled?: boolean } = {}) {
+  const userId = useSession((state) => state.user?.id)
+  return useQuery({
+    queryKey: ['likes', userId],
+    queryFn: ({ signal }) => likesApi.list(signal),
+    enabled: !!userId && enabled,
+  })
+}
+
+/** 新增喜欢 */
+export function useAddLike(
+  options: LikeSuccessOptions<Awaited<ReturnType<typeof likesApi.add>>, Track> = {},
+) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: likesApi.add,
+    onMutate: () => useSession.getState().user?.id,
+    onSuccess: async (data, track, userId) => {
+      await client.invalidateQueries({ queryKey: ['likes', userId], exact: true })
+      if (useSession.getState().user?.id === userId) await options.onSuccess?.(data, track)
+    },
+  })
+}
+
+/** 取消喜欢 */
+export function useRemoveLike(options: LikeSuccessOptions<null, Track> = {}) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: likesApi.remove,
+    onMutate: () => useSession.getState().user?.id,
+    onSuccess: async (data, track, userId) => {
+      await client.invalidateQueries({ queryKey: ['likes', userId], exact: true })
+      if (useSession.getState().user?.id === userId) await options.onSuccess?.(data, track)
+    },
+  })
+}
+
+/** 清空喜欢 */
+export function useClearLikes(options: LikeSuccessOptions<null> = {}) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: () => likesApi.clear(),
+    onMutate: () => useSession.getState().user?.id,
+    onSuccess: async (data, variables, userId) => {
+      await client.invalidateQueries({ queryKey: ['likes', userId], exact: true })
+      if (useSession.getState().user?.id === userId) await options.onSuccess?.(data, variables)
+    },
+  })
+}
+
+/** 歌单链接导入 */
+export function useImportLikes(options: LikeSuccessOptions<ImportLikesResult, string> = {}) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: likesApi.import,
+    onMutate: () => useSession.getState().user?.id,
+    onSuccess: async (data, url, userId) => {
+      await client.invalidateQueries({ queryKey: ['likes', userId], exact: true })
+      if (useSession.getState().user?.id === userId) await options.onSuccess?.(data, url)
+    },
+  })
+}
+
+/** 音乐搜索 */
+export function useMusicSearch(source: MusicSource, keyword: string) {
+  const userId = useSession((state) => state.user?.id)
+  const q = keyword.trim()
+  return useInfiniteQuery({
+    queryKey: ['music', 'search', source, q],
+    initialPageParam: 0,
+    queryFn: ({ signal, pageParam }) => musicApi.search(source, q, pageParam, 30, signal),
+    getNextPageParam: (page) => (page.hasMore ? page.offset + page.limit : undefined),
+    enabled: !!userId && !!q,
+  })
+}
+/** 歌词搜索 */
+export function useLyrics(track: Track | null) {
+  return useQuery({
+    queryKey: ['music', 'lyrics', track?.source, track?.source_id],
+    queryFn: ({ signal }) => musicApi.lyrics(track!.source, track!.source_id, signal),
+    enabled: !!track,
+    staleTime: 60_000,
+  })
+}
+
+/** 房间 hooks ---------- */
+
 /** 大厅按账号隔离，每十五秒刷新安全摘要。 */
 export function useRooms(q: string) {
   const userId = useSession((s) => s.user?.id)

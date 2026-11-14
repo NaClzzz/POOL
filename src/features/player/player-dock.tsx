@@ -29,6 +29,7 @@ import { SortableQueue } from '@/features/music/sortable-queue'
 export function PersonalPlayerDock() {
   const state = usePlayer()
   const [queueOpen, setQueueOpen] = useState(false)
+  const [queueScrollElement, setQueueScrollElement] = useState<HTMLDivElement | null>(null)
   const likes = useLikes()
   const addLike = useAddLike()
   const removeLike = useRemoveLike()
@@ -165,7 +166,7 @@ export function PersonalPlayerDock() {
               onValueChange={(value) => state.setVolume((value as number[])[0])}
             />
             <span className={styles.dockDivider} />
-            <Sheet open={queueOpen} onOpenChange={setQueueOpen}>
+            <Sheet modal="trap-focus" open={queueOpen} onOpenChange={setQueueOpen}>
               <SheetTrigger
                 render={<Button variant="ghost" size="icon" aria-label="个人播放队列" />}
               >
@@ -175,9 +176,10 @@ export function PersonalPlayerDock() {
                 <SheetHeader>
                   <SheetTitle>播放队列 · {state.queue.length}</SheetTitle>
                 </SheetHeader>
-                <div className={sharedStyles.sheetBody}>
+                <div ref={setQueueScrollElement} className={sharedStyles.sheetBody}>
                   {state.queue.length ? (
                     <SortableQueue
+                      scrollElement={queueScrollElement}
                       tracks={state.queue}
                       currentIndex={state.index}
                       onSelect={state.select}

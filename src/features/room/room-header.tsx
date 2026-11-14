@@ -21,18 +21,12 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { useSession } from '@/stores/session'
 import type { RoomSettings, RoomSnapshot } from '@/contracts/room'
 import type { RoomCommand } from './room-participants'
 import styles from './room-page.module.css'
 import shared from '@/components/presentation.module.css'
+import { cn } from '@/lib/utils'
 
 /** 房主表单独立维护草稿，打开时以最新快照初始化。 */
 export function RoomHeader({
@@ -47,13 +41,13 @@ export function RoomHeader({
   leave: () => void
 }) {
   const userId = useSession((s) => s.user!.id)
-  const [open, setOpen] = useState(false),
-    [pending, setPending] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [pending, setPending] = useState(false)
   const [settings, setSettings] = useState<RoomSettings>({
     name: '',
     tag: '',
-    maxMembers: 12,
-    maxStageMembers: 4,
+    maxMembers: 10,
+    maxStageMembers: 10,
     passwordAction: 'keep',
   })
   const [error, setError] = useState('')
@@ -153,33 +147,38 @@ export function RoomHeader({
                     />
                   </label>
                 </div>
-                <label className={shared.field}>
-                  房间密码
-                  <Select
-                    value={settings.passwordAction}
-                    onValueChange={(value) =>
-                      value &&
-                      setSettings({
-                        ...settings,
-                        passwordAction: value as RoomSettings['passwordAction'],
-                      })
-                    }
-                    items={[
-                      { value: 'keep', label: '保持不变' },
-                      { value: 'set', label: '设置新密码' },
-                      { value: 'remove', label: '移除密码' },
-                    ]}
+                <div className={shared.field}>
+                  <span>房间密码</span>
+                  <div
+                    className={styles.passwordOptions}
+                    role="radiogroup"
+                    aria-label="房间密码操作"
                   >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent alignItemWithTrigger={false}>
-                      <SelectItem value="keep">保持不变</SelectItem>
-                      <SelectItem value="set">设置新密码</SelectItem>
-                      <SelectItem value="remove">移除密码</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </label>
+                    {(
+                      [
+                        ['keep', '保持不变'],
+                        ['set', '设置新密码'],
+                        ['remove', '移除密码'],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <Button
+                        key={value}
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        role="radio"
+                        aria-checked={settings.passwordAction === value}
+                        className={cn(
+                          styles.passwordOption,
+                          settings.passwordAction === value && styles.passwordOptionActive,
+                        )}
+                        onClick={() => setSettings({ ...settings, passwordAction: value })}
+                      >
+                        {label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
                 {settings.passwordAction === 'set' && (
                   <Input
                     type="password"

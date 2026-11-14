@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Search, Shuffle, Trash2, Upload } from 'lucide-react'
 import type { RoomSnapshot } from '@/contracts/room'
 import type { MusicSource } from '@/contracts/domain'
@@ -43,10 +43,7 @@ export function RoomPlaylistSheet({
   const [search, setSearch] = useState('')
   const [keyword, setKeyword] = useState('')
   const [source, setSource] = useState<MusicSource>('netease')
-  useEffect(() => {
-    const timer = setTimeout(() => setKeyword(search.trim()), 400)
-    return () => clearTimeout(timer)
-  }, [search])
+  const [playlistScrollElement, setPlaylistScrollElement] = useState<HTMLDivElement | null>(null)
   const results = useMusicSearch(source, open ? keyword : '')
   const tracks = results.data?.pages.flatMap((page) => page.items) ?? []
   const disconnected = !connected
@@ -60,7 +57,15 @@ export function RoomPlaylistSheet({
         <section className={styles.column} aria-label="房间内搜歌">
           <div className={styles.columnHeader}>
             <h3 className={styles.columnTitle}>房间内搜歌</h3>
-            <div className={styles.searchControls}>
+            <form
+              className={styles.searchControls}
+              onSubmit={(event) => {
+                event.preventDefault()
+                const nextKeyword = search.trim()
+                setKeyword(nextKeyword)
+                if (nextKeyword && nextKeyword === keyword) void results.refetch()
+              }}
+            >
               <Select
                 value={source}
                 onValueChange={(value) => value && setSource(value as MusicSource)}
@@ -89,10 +94,13 @@ export function RoomPlaylistSheet({
                   onChange={(event) => setSearch(event.target.value)}
                 />
               </div>
-            </div>
+              <Button type="submit" size="sm" disabled={!search.trim() || results.isFetching}>
+                搜索
+              </Button>
+            </form>
           </div>
           <div className={styles.scrollArea}>
-            {!search.trim() ? (
+            {!keyword ? (
               <Empty title="输入关键词搜索" />
             ) : results.isPending ? (
               <Loading />
@@ -158,9 +166,10 @@ export function RoomPlaylistSheet({
               </Button>
             </div>
           </div>
-          <div className={styles.scrollArea}>
+          <div ref={setPlaylistScrollElement} className={styles.scrollArea}>
             {snapshot.myPlaylist.length ? (
               <SortableQueue
+                scrollElement={playlistScrollElement}
                 tracks={snapshot.myPlaylist.map((item) => item.track)}
                 disabled={disconnected}
                 onMove={(track, toIndex) =>

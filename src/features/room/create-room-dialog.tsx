@@ -34,9 +34,9 @@ export function CreateRoomDialog() {
   const form = useForm<CreateFields>({
     defaultValues: {
       name: '',
-      tag: '松弛一下',
-      maxMembers: 12,
-      maxStageMembers: 4,
+      tag: '',
+      maxMembers: 10,
+      maxStageMembers: 10,
       protected: false,
       password: '',
     },

@@ -32,8 +32,8 @@ export function RoomPage({ code }: { code: string }) {
   const userId = useSession((s) => s.user!.id)
   const session = useRoomSession(code)
   const { snapshot, connection, error, command } = session
-  const [password, setPassword] = useState(''),
-    [queueOpen, setQueueOpen] = useState(false)
+  const [password, setPassword] = useState('')
+  const [queueOpen, setQueueOpen] = useState(false)
   const onMediaError = useCallback(
     (version: number, itemId: string) => {
       if (snapshot?.playback.activeMemberId === userId)
@@ -100,7 +100,7 @@ export function RoomPage({ code }: { code: string }) {
       </div>
     )
   return (
-    <Sheet open={queueOpen} onOpenChange={setQueueOpen}>
+    <Sheet modal="trap-focus" open={queueOpen} onOpenChange={setQueueOpen}>
       <div className={styles.roomPage}>
         <audio ref={audioRef} preload="metadata" />
         <RoomHeader

@@ -28,6 +28,26 @@
   margin-top: 9px;
 }
 
+.passwordOptions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--muted);
+}
+
+.passwordOption {
+  min-width: 0;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.passwordOptionActive {
+  color: var(--foreground);
+  background: var(--card);
+}
+
 .roomContent {
   flex: 1;
   min-height: 0;

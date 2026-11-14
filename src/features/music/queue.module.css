@@ -1,4 +1,21 @@
+.virtualSpace {
+  position: relative;
+}
+
+.virtualRow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+.overlay {
+  background: var(--surface-soft);
+  border-radius: 7px;
+}
+
 .queueItem {
+  height: var(--queue-row-height);
   display: flex;
   align-items: center;
   gap: 10px;

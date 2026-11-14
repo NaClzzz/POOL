@@ -109,7 +109,6 @@ export function RoomChat({
               !connected || pending || !message.trim() || Array.from(message.trim()).length > 120
             }
           >
-            <Send />
             发送
           </Button>
         </div>
