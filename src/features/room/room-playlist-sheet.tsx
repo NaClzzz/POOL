@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
 import { Search, Shuffle, Trash2, Upload } from 'lucide-react'
-import type { RoomSnapshot, Track } from '@/contracts/domain'
-import { api } from '@/mocks/api'
+import type { RoomSnapshot } from '@/contracts/room'
+import type { MusicSource } from '@/contracts/domain'
+import type { RoomCommand } from './room-participants'
+import { useMusicSearch } from '@/lib/api-client'
 import { SortableQueue } from '@/features/music/sortable-queue'
 import { TrackList } from '@/features/music/track-list'
 import { Button } from '@/components/ui/button'
@@ -27,10 +28,8 @@ type RoomPlaylistSheetProps = {
   snapshot: RoomSnapshot
   open: boolean
   error: string
-  onAdd: (track: Track) => void
-  onMove: (track: Track, toIndex: number) => void
-  onRemove: (track: Track) => void
-  onAction: (action: 'import' | 'shuffle' | 'clear') => void
+  connected: boolean
+  command: RoomCommand
 }
 
 /** 左列搜索加歌、右列管理歌单；两个内容区域独立滚动。 */
@@ -38,19 +37,19 @@ export function RoomPlaylistSheet({
   snapshot,
   open,
   error,
-  onAdd,
-  onMove,
-  onRemove,
-  onAction,
+  connected,
+  command,
 }: RoomPlaylistSheetProps) {
   const [search, setSearch] = useState('')
-  const [source, setSource] = useState('netease')
-  const results = useQuery({
-    queryKey: ['music', 'room-search', source, search],
-    queryFn: ({ signal }) => api.search(source, search, signal),
-    enabled: open,
-  })
-  const disconnected = snapshot.connection !== 'joined'
+  const [keyword, setKeyword] = useState('')
+  const [source, setSource] = useState<MusicSource>('netease')
+  useEffect(() => {
+    const timer = setTimeout(() => setKeyword(search.trim()), 400)
+    return () => clearTimeout(timer)
+  }, [search])
+  const results = useMusicSearch(source, open ? keyword : '')
+  const tracks = results.data?.pages.flatMap((page) => page.items) ?? []
+  const disconnected = !connected
   return (
     <SheetContent className={styles.sheet} aria-describedby={undefined}>
       <SheetHeader>
@@ -64,7 +63,7 @@ export function RoomPlaylistSheet({
             <div className={styles.searchControls}>
               <Select
                 value={source}
-                onValueChange={(value) => value && setSource(value)}
+                onValueChange={(value) => value && setSource(value as MusicSource)}
                 items={[
                   { value: 'netease', label: '网易云' },
                   { value: 'bilibili', label: 'Bilibili' },
@@ -93,14 +92,36 @@ export function RoomPlaylistSheet({
             </div>
           </div>
           <div className={styles.scrollArea}>
-            {results.isPending ? (
+            {!search.trim() ? (
+              <Empty title="输入关键词搜索" />
+            ) : results.isPending ? (
               <Loading />
             ) : results.isError ? (
               <ErrorState error={results.error} retry={() => void results.refetch()} />
-            ) : results.data.length ? (
-              <TrackList tracks={results.data} compact onAdd={onAdd} disabled={disconnected} />
+            ) : tracks.length ? (
+              <TrackList
+                tracks={tracks}
+                compact
+                onAdd={(track) =>
+                  void command('room:playlist:add', {
+                    source: track.source,
+                    source_id: track.source_id,
+                    extra: track.extra,
+                  })
+                }
+                disabled={disconnected}
+              />
             ) : (
               <Empty title="没有找到歌曲" />
+            )}
+            {results.hasNextPage && (
+              <Button
+                variant="ghost"
+                disabled={results.isFetchingNextPage}
+                onClick={() => void results.fetchNextPage()}
+              >
+                加载更多
+              </Button>
             )}
           </div>
         </section>
@@ -112,7 +133,7 @@ export function RoomPlaylistSheet({
                 variant="outline"
                 size="sm"
                 disabled={disconnected}
-                onClick={() => onAction('import')}
+                onClick={() => void command('room:playlist:import-liked', {})}
               >
                 <Upload />
                 导入喜欢
@@ -121,7 +142,7 @@ export function RoomPlaylistSheet({
                 variant="ghost"
                 size="sm"
                 disabled={disconnected || snapshot.myPlaylist.length < 2}
-                onClick={() => onAction('shuffle')}
+                onClick={() => void command('room:playlist:shuffle', {})}
               >
                 <Shuffle />
                 打乱
@@ -130,7 +151,7 @@ export function RoomPlaylistSheet({
                 variant="ghost"
                 size="sm"
                 disabled={disconnected || !snapshot.myPlaylist.length}
-                onClick={() => onAction('clear')}
+                onClick={() => void command('room:playlist:clear', {})}
               >
                 <Trash2 />
                 清空
@@ -140,10 +161,27 @@ export function RoomPlaylistSheet({
           <div className={styles.scrollArea}>
             {snapshot.myPlaylist.length ? (
               <SortableQueue
-                tracks={snapshot.myPlaylist}
+                tracks={snapshot.myPlaylist.map((item) => item.track)}
                 disabled={disconnected}
-                onMove={onMove}
-                onRemove={onRemove}
+                onMove={(track, toIndex) =>
+                  void command('room:playlist:reorder', {
+                    itemId: snapshot.myPlaylist.find(
+                      (item) =>
+                        item.track.source === track.source &&
+                        item.track.source_id === track.source_id,
+                    )!.itemId,
+                    toIndex,
+                  })
+                }
+                onRemove={(track) =>
+                  void command('room:playlist:remove', {
+                    itemId: snapshot.myPlaylist.find(
+                      (item) =>
+                        item.track.source === track.source &&
+                        item.track.source_id === track.source_id,
+                    )!.itemId,
+                  })
+                }
               />
             ) : (
               <Empty title="房间歌单为空" />

@@ -149,7 +149,7 @@ export function LikesPage() {
                 <SheetTitle>歌单分析</SheetTitle>
               </SheetHeader>
               <div className={sharedStyles.sheetBody}>
-                <GenerationPanel kind="analysis" tracks={query.data} />
+                <GenerationPanel tracks={query.data} />
               </div>
             </SheetContent>
           </Sheet>

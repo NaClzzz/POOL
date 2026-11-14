@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { authReturnTo } from '@/lib/auth-redirect'
-import { api, resetDemo, setMockUser, setScenario, requireUser } from '@/mocks/api'
-import { catalog } from '@/mocks/fixtures'
+import { generateText, resetDemo, setMockUser, requireUser } from '@/mocks/api'
+import { catalog } from './fixtures/tracks'
 
 afterEach(() => {
   setMockUser(null)
@@ -21,27 +21,22 @@ describe('真实账号与 mock 过渡边界', () => {
     expect(authReturnTo('/search?q=风&source=netease')).toBe('/search?q=风&source=netease')
   })
 
-  it('真实主键身份不会继承相同邮箱下的演示资料', async () => {
+  it('未登录不能开始演示，真实身份只作为任务归属', () => {
     resetDemo()
     setMockUser({ id: 'real-auth-id', email: 'demo@pool.local', name: '真实账号' })
-    expect(await api.likes()).toEqual([])
-    expect(await api.history()).toEqual([])
+    expect(requireUser().id).toBe('real-auth-id')
     setMockUser(null)
     expect(requireUser).toThrow('请先登录')
   })
 
-  it('账号切换后取消旧身份的延迟操作，不把收藏写入新账号', async () => {
+  it('账号切换取消旧 AI 演示，不输出给新账号', async () => {
     resetDemo()
-    vi.useFakeTimers()
-    setScenario('slow')
-    setMockUser({ id: 'user-a', email: 'same@example.com', name: 'A' })
-    const operation = api.addLike(catalog[0])
+    setMockUser({ id: 'a', email: 'a@example.com', name: 'A' })
+    const output = vi.fn()
+    const operation = generateText(output, new AbortController().signal, catalog)
     const assertion = expect(operation).rejects.toMatchObject({ name: 'AbortError' })
-    setMockUser({ id: 'user-b', email: 'same@example.com', name: 'B' })
-    await vi.runAllTimersAsync()
+    setMockUser({ id: 'b', email: 'b@example.com', name: 'B' })
     await assertion
-    vi.useRealTimers()
-    setScenario('normal')
-    expect(await api.likes()).toEqual([])
+    expect(output).not.toHaveBeenCalled()
   })
 })

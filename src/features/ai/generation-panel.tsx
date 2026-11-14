@@ -10,14 +10,10 @@ import type { Track } from '@/contracts/domain'
 
 /** 固定内容分段生成界面，真实 AI SDK 由独立生成服务接入。 */
 export function GenerationPanel({
-  kind,
-  roomId,
   initial = '',
   onComplete,
   tracks,
 }: {
-  kind: 'analysis' | 'summary'
-  roomId?: string
   initial?: string
   onComplete?: () => void
   tracks?: Track[]
@@ -37,7 +33,7 @@ export function GenerationPanel({
     setError('')
     setText('')
     try {
-      await generateText(kind, roomId, setText, controller.current.signal, tracks)
+      await generateText(setText, controller.current.signal, tracks)
       setStatus('done')
       onComplete?.()
     } catch (failure) {
@@ -58,9 +54,7 @@ export function GenerationPanel({
         </div>
       ) : (
         <div className={styles.generationEmpty}>
-          <p className={styles.emptyDescription}>
-            {kind === 'analysis' ? '尚未生成歌单分析' : '尚未生成房间总结'}
-          </p>
+          <p className={styles.emptyDescription}>尚未生成歌单分析</p>
         </div>
       )}
       {error && (
@@ -85,11 +79,7 @@ export function GenerationPanel({
         ) : (
           <Button onClick={() => void generate()}>
             {status === 'error' ? <RotateCcw /> : <Feather />}
-            {status === 'error'
-              ? '重新生成'
-              : kind === 'analysis'
-                ? '生成歌单分析'
-                : '生成房间总结'}
+            {status === 'error' ? '重新生成' : '生成歌单分析'}
           </Button>
         )}
       </div>

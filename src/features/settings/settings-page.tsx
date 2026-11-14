@@ -3,7 +3,6 @@ import styles from '@/features/settings/settings-page.module.css'
 import sharedStyles from '@/components/presentation.module.css'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
 import { Check, LogOut, RotateCcw, Volume2 } from 'lucide-react'
 import { useSession } from '@/stores/session'
 import { usePlayer } from '@/stores/player'
@@ -26,7 +25,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 
-/** 本地偏好、可重复演示场景与账号退出，真实账号退出连接认证服务，其余业务仍为演示。 */
+/** 本地偏好、可重复演示场景与账号退出，账号、房间和音乐均为真实服务，仅歌单分析保留演示。 */
 export function SettingsPage() {
   const user = useSession((s) => s.user!)
   const volume = usePlayer((s) => s.volume)
@@ -34,21 +33,17 @@ export function SettingsPage() {
   const [scenario, updateScenario] = useState<DemoScenario>(() => getDatabase().scenario)
   const [notice, setNotice] = useState('')
   const [resetOpen, setResetOpen] = useState(false)
-  const client = useQueryClient()
   const { logout, pending, error: logoutError } = useLogout()
-  /** 场景改变后失效查询，但不退出模拟会话。 */
+  /** 切换后仅下一次 AI 演示读取新场景。 */
   const selectScenario = (value: DemoScenario) => {
     setScenario(value)
     updateScenario(value)
-    void client.invalidateQueries()
     setNotice('演示场景已切换')
   }
-  /** 重置仅清理 POOL 原型命名空间，保留当前演示身份。 */
+  /** 重置仅取消旧 AI 演示任务并恢复演示场景。 */
   const reset = () => {
     resetDemo()
     updateScenario('normal')
-    usePlayer.getState().reset()
-    client.clear()
     setNotice('演示数据已重置，可以重新开始')
     setResetOpen(false)
   }
@@ -114,9 +109,7 @@ export function SettingsPage() {
         <div className={styles.settingsSectionHeading}>
           <h2 className={styles.sectionTitle}>演示选项</h2>
         </div>
-        <p className={styles.settingsDescription}>
-          以下场景只影响模拟房间与 AI，不影响真实账号、音乐查询及收藏。
-        </p>
+        <p className={styles.settingsDescription}>以下场景只影响 AI 歌单分析演示。</p>
         <div className={styles.scenarioGrid}>
           {scenarios.map(([value, title, text]) => (
             <button
@@ -139,9 +132,7 @@ export function SettingsPage() {
         <div className={styles.settingRow}>
           <div>
             <h3 className={styles.settingTitle}>重置演示数据</h3>
-            <p className={styles.settingDescription}>
-              重置模拟房间、历史、总结和演示场景，不修改真实账号与喜欢。
-            </p>
+            <p className={styles.settingDescription}>重置 AI 演示场景。</p>
           </div>
           <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
             <AlertDialogTrigger render={<Button variant="outline" />}>
@@ -151,9 +142,7 @@ export function SettingsPage() {
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>重置演示数据？</AlertDialogTitle>
-                <AlertDialogDescription>
-                  模拟房间、历史、总结和演示场景将恢复默认值；真实喜欢和账号保留。
-                </AlertDialogDescription>
+                <AlertDialogDescription>AI 演示场景将恢复默认值。</AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>取消</AlertDialogCancel>

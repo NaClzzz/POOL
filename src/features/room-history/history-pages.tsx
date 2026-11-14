@@ -5,12 +5,9 @@ import styles from '@/features/room-history/history-pages.module.css'
 import sharedStyles from '@/components/presentation.module.css'
 import Link from 'next/link'
 import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ArrowUpRight, Clock3, Feather, Headphones, Trash2 } from 'lucide-react'
-import { api } from '@/mocks/api'
-import { useSession } from '@/stores/session'
+import { useRoomHistory, useDeleteRoomHistory } from '@/lib/api-client'
 import { formatDate } from '@/lib/utils'
-import { GenerationPanel } from '@/features/ai/generation-panel'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -26,20 +23,11 @@ import {
 import { Empty, ErrorState, Loading } from '@/components/feedback'
 import { PageHeader } from '@/components/page-header'
 
-/** 本人历史列表，删除只移除访问凭证而不删除共享总结。 */
+/** 本人历史列表，删除只移除本人访问凭证。 */
 export function HistoryPage() {
-  const userId = useSession((s) => s.user!.id)
-  const client = useQueryClient()
   const [deleting, setDeleting] = useState<string | null>(null)
-  const query = useQuery({ queryKey: ['room-history', userId], queryFn: () => api.history() })
-  const remove = useMutation({
-    mutationFn: (id: string) => api.deleteHistory(id),
-    onSuccess: async () => {
-      setDeleting(null)
-      await client.invalidateQueries({ queryKey: ['room-history', userId] })
-      client.removeQueries({ queryKey: ['room-summary', userId] })
-    },
-  })
+  const query = useRoomHistory()
+  const remove = useDeleteRoomHistory({ onSuccess: () => setDeleting(null) })
   return (
     <AlertDialog open={!!deleting} onOpenChange={(value) => !value && setDeleting(null)}>
       <Link href="/rooms" className={cn(sharedStyles.backLink, sharedStyles.link)}>
@@ -72,15 +60,9 @@ export function HistoryPage() {
                 </p>
               </div>
               <div className={styles.historyActions}>
-                <span
-                  className={cn(styles.historyStatus, room.summary === 'succeeded' && styles.ready)}
-                >
+                <span className={styles.historyStatus}>
                   {room.status === 'active' ? <Headphones size={15} /> : <Feather size={15} />}
-                  {room.status === 'active'
-                    ? '正在一起听'
-                    : room.summary === 'succeeded'
-                      ? '总结已生成'
-                      : '总结未生成'}
+                  {room.status === 'active' ? '正在一起听' : '房间已结束'}
                 </span>
                 <Button
                   variant="outline"
@@ -95,7 +77,7 @@ export function HistoryPage() {
                     />
                   }
                 >
-                  {room.status === 'active' ? '进入房间' : '查看总结'}
+                  {room.status === 'active' ? '进入房间' : '查看记录'}
                   <ArrowUpRight />
                 </Button>
                 <AlertDialogTrigger
@@ -119,7 +101,7 @@ export function HistoryPage() {
         <AlertDialogHeader>
           <AlertDialogTitle>删除这条房间历史？</AlertDialogTitle>
           <AlertDialogDescription>
-            你会失去该房间总结的生成与查看权限。其他参与者的记录与共享总结不受影响。
+            删除后无法再访问该房间详情，其他参与者的历史不受影响。
           </AlertDialogDescription>
         </AlertDialogHeader>
         {remove.error && <p className={sharedStyles.inlineError}>{remove.error.message}</p>}
@@ -138,69 +120,4 @@ export function HistoryPage() {
   )
 }
 
-/** 按历史凭证读取归档和唯一总结，成功后不提供删除或重新生成。 */
-export function HistoryDetail({ roomId }: { roomId: string }) {
-  const userId = useSession((s) => s.user!.id)
-  const client = useQueryClient()
-  const query = useQuery({
-    queryKey: ['room-summary', userId, roomId],
-    queryFn: () => api.summary(roomId),
-    refetchInterval: (state) => (state.state.data?.summary.status === 'generating' ? 1200 : false),
-  })
-  return (
-    <>
-      <Link href="/rooms/history" className={cn(sharedStyles.backLink, sharedStyles.link)}>
-        <ArrowLeft size={15} />
-        返回房间历史
-      </Link>
-      {query.isPending ? (
-        <Loading />
-      ) : query.isError ? (
-        <ErrorState error={query.error} retry={() => void query.refetch()} />
-      ) : (
-        <div className={styles.memoryPage}>
-          <div className={styles.memoryHeading}>
-            <div>
-              <h1 className={styles.memoryTitle}>{query.data.room.name}</h1>
-              <p className={styles.memoryMeta}>
-                {query.data.room.endedAt && formatDate(query.data.room.endedAt)}
-                <span>·</span>房间结束时间
-              </p>
-            </div>
-          </div>
-          <div className={styles.memoryPaper}>
-            <h2 className={styles.summaryTitle}>房间总结</h2>
-            {query.data.room.status === 'active' ? (
-              <div className={sharedStyles.emptyState}>
-                <h3 className={sharedStyles.emptyTitle}>房间尚未结束</h3>
-                <p className={sharedStyles.emptyDescription}>结束后可生成总结。</p>
-                <Button
-                  nativeButton={false}
-                  render={<Link href={`/rooms/${query.data.room.roomCode}`} />}
-                >
-                  返回房间
-                </Button>
-              </div>
-            ) : (
-              <GenerationPanel
-                key={roomId}
-                kind="summary"
-                roomId={roomId}
-                initial={
-                  query.data.summary.status === 'succeeded' ? query.data.summary.content : ''
-                }
-                onComplete={() => {
-                  void client.invalidateQueries({ queryKey: ['room-summary', userId, roomId] })
-                  void client.invalidateQueries({ queryKey: ['room-history', userId] })
-                }}
-              />
-            )}
-            <div className={styles.memoryPaperBottom}>
-              这份总结由所有参与者共同拥有，房间结束满 7 天清理。
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  )
-}
+export { HistoryDetail } from './history-detail'

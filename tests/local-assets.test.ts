@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { catalog } from '@/mocks/fixtures'
+import { catalog } from './fixtures/tracks'
 
 describe('离线演示资源', () => {
   for (const audio of ['tide', 'dusk']) {

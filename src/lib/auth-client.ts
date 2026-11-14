@@ -3,7 +3,7 @@ import { createAuthClient } from 'better-auth/react'
 
 /** 同域 Cookie 认证客户端；会话只由服务端管理，不保存浏览器认证令牌。 */
 export const authClient = createAuthClient({
-  sessionOptions: { refetchOnWindowFocus: true, refetchInterval: 60 },
+  sessionOptions: { refetchOnWindowFocus: true, refetchInterval: 300 },
 })
 
 /** 把认证库和网络错误转为表单反馈，保留未分类错误的安全提示。 */

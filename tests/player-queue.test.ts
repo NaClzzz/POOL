@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { usePlayer } from '@/stores/player'
-import { catalog } from '@/mocks/fixtures'
+import { catalog } from './fixtures/tracks'
 import { trackKey } from '@/contracts/domain'
 
 beforeEach(() => usePlayer.getState().reset())
