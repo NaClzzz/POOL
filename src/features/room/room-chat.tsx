@@ -1,12 +1,11 @@
 'use client'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Send } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { useSession } from '@/stores/session'
 import { cn } from '@/lib/utils'
 import type { ChatMessage } from '@/contracts/room'
-import type { RoomCommand } from './room-participants'
+import type { RoomCommand } from './types'
 import styles from './room-page.module.css'
 import shared from '@/components/presentation.module.css'
 

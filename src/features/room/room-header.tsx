@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useSession } from '@/stores/session'
 import type { RoomSettings, RoomSnapshot } from '@/contracts/room'
-import type { RoomCommand } from './room-participants'
+import type { RoomCommand } from './types'
 import styles from './room-page.module.css'
 import shared from '@/components/presentation.module.css'
 import { cn } from '@/lib/utils'

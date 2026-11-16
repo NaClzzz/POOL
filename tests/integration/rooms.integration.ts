@@ -44,6 +44,7 @@ const { handleAuthRequest } = await import('../../src/server/auth/handler')
 const { authRedis } = await import('../../src/server/auth/rate-limit')
 const { getRedis } = await import('../../src/server/redis')
 const repo = await import('../../src/server/rooms/repository')
+const roomService = await import('../../src/server/rooms/service')
 const { createRoomSocketServer } = await import('../../src/server/rooms/socket-server')
 const { POST: resolveTrack } = await import('../../src/app/api/internal/room-track/route')
 const { GET: listRoute, POST: createRoute } = await import('../../src/app/api/rooms/route')
@@ -183,7 +184,7 @@ async function create(account: (typeof users)[number], password?: string) {
   assert.equal(response.status, 201, await response.clone().text())
   const data = (await response.json()).data
   roomIds.push(data.roomId)
-  return data as Awaited<ReturnType<typeof repo.createRoom>>
+  return data as Awaited<ReturnType<typeof roomService.createRoom>>
 }
 
 before(async () => {
@@ -238,6 +239,54 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
       403,
     )
   })
+  it('并发创建仍只有一个有效房间，密码房按完整房间号查询且遵循分页校验', async () => {
+    const responses = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        createRoute(
+          new Request(`${base}/api/rooms`, {
+            method: 'POST',
+            headers: { cookie: users[2].cookie, origin: base, 'content-type': 'application/json' },
+            body: JSON.stringify({
+              name: '私密测试房间',
+              tag: '测试标签',
+              maxMembers: 3,
+              maxStageMembers: 2,
+              password: 'secret-room',
+            }),
+          }),
+        ),
+      ),
+    )
+    assert.deepEqual(responses.map((response) => response.status).sort(), [201, 409])
+    const created = (await responses.find((response) => response.status === 201)!.json()).data
+    roomIds.push(created.roomId)
+    assert.equal('passwordHash' in created, false)
+    const rejected = await responses.find((response) => response.status === 409)!.json()
+    assert.equal(rejected.error.code, 'ROOM_ALREADY_CREATED')
+    const hidden = await listRoute(
+      new Request(`${base}/api/rooms?q=${encodeURIComponent(created.name)}`, {
+        headers: { cookie: users[0].cookie },
+      }),
+    )
+    assert.deepEqual((await hidden.json()).data.rooms.items, [])
+    const exact = await listRoute(
+      new Request(`${base}/api/rooms?q=${created.roomCode}`, {
+        headers: { cookie: users[0].cookie },
+      }),
+    )
+    assert.equal((await exact.json()).data.rooms.items[0].roomId, created.roomId)
+    const mine = await listRoute(
+      new Request(`${base}/api/rooms`, { headers: { cookie: users[2].cookie } }),
+    )
+    assert.equal((await mine.json()).data.myRoom.roomId, created.roomId)
+    const invalid = await listRoute(
+      new Request(`${base}/api/rooms?limit=501`, { headers: { cookie: users[0].cookie } }),
+    )
+    assert.equal(invalid.status, 400)
+    const owner = await connect(users[2].cookie)
+    await snapshot(owner, 'room:join', { roomCode: created.roomCode, password: 'secret-room' })
+    assert.equal((await command(owner, 'room:dissolve', {})).ok, true)
+  })
   it('真实创建、密码与容量，失败加入不写历史，同房多连接只计一人', async () => {
     const room = await create(users[0], 'secret-room'),
       a = await connect(users[0].cookie),
@@ -245,7 +294,7 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
       tab = await connect(users[0].cookie)
     const wrong = await command(b, 'room:join', { roomCode: room.roomCode, password: 'wrong' })
     assert.equal(wrong.ok, false)
-    assert.equal((await repo.listHistory(users[1].id)).length, 0)
+    assert.equal((await roomService.listHistory(users[1].id)).length, 0)
     await snapshot(a, 'room:join', { roomCode: room.roomCode, password: 'secret-room' })
     await snapshot(b, 'room:join', { roomCode: room.roomCode, password: 'secret-room' })
     const state = await snapshot(tab, 'room:join', {
@@ -444,19 +493,19 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
       maxStageMembers: 2,
       status: 'ended' as const,
       endedAt: new Date(now),
-      expiresAt: new Date(now + repo.ARCHIVE_MS),
-      emptyExpiresAt: new Date(now + repo.EMPTY_ROOM_MS),
+      expiresAt: new Date(now + roomService.ARCHIVE_MS),
+      emptyExpiresAt: new Date(now + roomService.EMPTY_ROOM_MS),
     }))
     roomIds.push(...seeded.map((r) => r.id))
     await db.insert(tables.rooms).values(seeded)
     for (const row of seeded) {
-      await repo.recordJoin((await repo.findRoom(row.code))!, users[2].id, 0, new Date())
+      await roomService.recordRoomJoin((await repo.findRoom(row.code))!, users[2].id, 0, new Date())
       await db
         .update(tables.roomMembers)
         .set({ leftAt: new Date() })
         .where(eq(tables.roomMembers.roomId, row.id))
     }
-    assert.equal((await repo.listHistory(users[2].id)).length, 50)
+    assert.equal((await roomService.listHistory(users[2].id)).length, 50)
     const id = seeded.at(-1)!.id
     const context = { params: Promise.resolve({ roomId: id }) }
     assert.equal(
@@ -481,7 +530,7 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
       200,
     )
     assert.ok(await repo.findRoom(seeded.at(-1)!.code))
-    assert.equal((await repo.listHistory(users[2].id)).length, 49)
+    assert.equal((await roomService.listHistory(users[2].id)).length, 49)
     assert.equal(
       (
         await historyRoute(
@@ -539,8 +588,8 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
     await snapshot(a, 'room:join', { roomCode: room.roomCode })
     await snapshot(a, 'room:stage:join', {})
     const before = await repo.getPlaylist(users[0].id),
-      history = await repo.listHistory(users[0].id)
-    const empty = await repo.createRoom(users[1].id, {
+      history = await roomService.listHistory(users[0].id)
+    const empty = await roomService.createRoom(users[1].id, {
       name: '空房测试',
       tag: '测试标签',
       maxMembers: 3,
@@ -557,7 +606,7 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
     assert.equal((await repo.findRoom(empty.roomCode))!.emptyExpiresAt.getTime(), expiry)
     assert.deepEqual(await repo.getPlaylist(users[0].id), before)
     assert.deepEqual(
-      (await repo.listHistory(users[0].id)).map((r) => [r.roomId, r.lastJoinedAt]),
+      (await roomService.listHistory(users[0].id)).map((r) => [r.roomId, r.lastJoinedAt]),
       history.map((r) => [r.roomId, r.lastJoinedAt]),
     )
     const again = await connect(users[0].cookie),
@@ -584,12 +633,12 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
     const row = (await repo.findRoom(room.roomCode))!
     assert.equal(row.status, 'ended')
     assert.equal(row.endedAt!.getTime(), emptyDeadline.getTime())
-    assert.equal(row.expiresAt!.getTime() - row.endedAt!.getTime(), repo.ARCHIVE_MS)
+    assert.equal(row.expiresAt!.getTime() - row.endedAt!.getTime(), roomService.ARCHIVE_MS)
     await db
       .update(tables.rooms)
       .set({ expiresAt: new Date(Date.now() - 1) })
       .where(eq(tables.rooms.id, room.roomId))
-    await assert.rejects(repo.historyDetail(users[0].id, room.roomId))
+    await assert.rejects(roomService.historyDetail(users[0].id, room.roomId))
     await server.service.sweep()
     assert.equal(await repo.findRoom(room.roomCode), undefined)
     const records = await db

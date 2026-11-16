@@ -21,12 +21,6 @@ export const trackSchema = referenceSchema.extend({
     .nullable(),
   extra: z.record(z.string(), z.unknown()).nullable(),
 })
-/** 统一分页入口最多读取 500 条。 */
-export const paginationSchema = z.object({
-  offset: z.coerce.number().int().min(0).default(0),
-  limit: z.coerce.number().int().min(1).max(500).default(20),
-})
-
 /** 只解析网易云正式分享地址中的歌单 ID，不向用户指定的地址发请求。 */
 export function neteasePlaylistId(value: string) {
   let url: URL

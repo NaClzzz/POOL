@@ -34,18 +34,18 @@ export function createRoomSocket(): Socket<ServerRoomEvents, ClientRoomEvents> {
 /** 命令不自动重放，断线立即拒绝，超时由会话 hook 拉取快照校准。 */
 export async function sendRoomCommand<K extends keyof RoomCommands>(
   socket: Socket<ServerRoomEvents, ClientRoomEvents>,
-  name: K,
+  command: K,
   payload: RoomCommands[K],
 ): Promise<RoomCommandResult> {
   if (!socket.connected) throw new RoomCommandError('NOT_CONNECTED', '房间正在重新连接')
   return new Promise((resolve, reject) => {
     // Socket.IO 的映射事件泛型不能保持动态索引的关联；只在已类型化边界适配一次。
     const emit = socket.timeout(20_000).emit.bind(socket) as (
-      event: K,
-      data: RoomCommands[K],
+      eventName: K,
+      payload: RoomCommands[K],
       ack: (error: Error | null, result: RoomAck<RoomCommandResult>) => void,
     ) => void
-    emit(name, payload, (error, result) => {
+    emit(command, payload, (error, result) => {
       if (error) {
         reject(new RoomCommandError('ACK_TIMEOUT', '操作确认超时，正在同步房间状态'))
         return

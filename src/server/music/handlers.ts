@@ -1,8 +1,9 @@
+import { paginationSchema } from '@/server/http/validation'
 import { z } from 'zod'
 import { businessRequest } from '../http/business'
 import { musicService } from './service'
 import { musicLimit } from './runtime'
-import { sourceSchema, referenceSchema, paginationSchema } from './validation'
+import { sourceSchema, referenceSchema } from './validation'
 import { BusinessError } from '../http/errors'
 
 /** GET 音乐查询在一个入口统一校验分页、来源和参数。 */

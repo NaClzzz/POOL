@@ -1,8 +1,10 @@
-import { randomUUID } from 'node:crypto'
-import { hashPassword } from 'better-auth/crypto'
-import { and, eq, lt, isNull, sql } from 'drizzle-orm'
-import { db } from '../db'
-import { rooms, roomMembers, roomPlaybackStates } from '../db/rooms-schema'
+import { randomBytes, randomUUID } from 'node:crypto'
+import { hashPassword, verifyPassword } from 'better-auth/crypto'
+import axios from 'axios'
+import { z } from 'zod'
+import { readServerEnv } from '../env'
+import { trackSchema } from '../music/validation'
+import { KeyedSerial } from './keyed-serial'
 import { BusinessError } from '../http/errors'
 import { trackKey, type Track } from '@/contracts/domain'
 import type {
@@ -12,8 +14,83 @@ import type {
   RoomCommands,
   RoomCommandResult,
   RoomSettings,
+  CreateRoom,
+  RoomHistory,
 } from '@/contracts/room'
 import * as repo from './repository'
+
+/** 空房与归档的业务保留期限。 */
+/** 每人保留最近五十条成功加入凭证。 */
+export const EMPTY_ROOM_MS = 30 * 60_000
+export const ARCHIVE_MS = 7 * 24 * 60 * 60_000
+export const ROOM_HISTORY_LIMIT = 50
+
+/** 房间活动状态只在 Service 判定，Repository 负责按条件读写。 */
+function isActiveRoom(row: repo.RoomRow, now = Date.now()) {
+  return row.status === 'active' && (row.memberCount > 0 || row.emptyExpiresAt.getTime() > now)
+}
+
+/** 创建时在用户事务锁内判断已有有效房间，密码原文不进入 Repository。 */
+export async function createRoom(userId: string, input: CreateRoom) {
+  const passwordHash = input.password ? await hashPassword(input.password) : null
+  const row = await repo.createRoom(
+    {
+      id: randomUUID(),
+      code: `pool-${randomBytes(8).toString('hex')}`,
+      ownerId: userId,
+      createdBy: userId,
+      name: input.name,
+      tag: input.tag,
+      maxMembers: input.maxMembers,
+      maxStageMembers: input.maxStageMembers,
+      passwordHash,
+      emptyExpiresAt: new Date(Date.now() + EMPTY_ROOM_MS),
+    },
+    (owned) => {
+      if (owned.some((room) => isActiveRoom(room)))
+        throw new BusinessError('ROOM_ALREADY_CREATED', '你已有有效房间，请进入我的房间', 409)
+    },
+  )
+  return repo.safeRoom(row)
+}
+
+/** 大厅只读取有效活动房间，分页和公开房筛选由 Repository 转成查询。 */
+export function listRooms(userId: string, q: string, offset: number, limit: number) {
+  return repo.listRooms(userId, q, offset, limit, {
+    status: 'active',
+    minMemberCount: 1,
+    emptyExpiresAfter: new Date(),
+    publicOnly: true,
+  })
+}
+
+/** 成功加入后在同一用户事务内应用历史淘汰规则。 */
+export function recordRoomJoin(row: repo.RoomRow, userId: string, count: number, joinedAt: Date) {
+  return repo.recordJoin(row, userId, count, joinedAt, (ids) => ids.slice(ROOM_HISTORY_LIMIT))
+}
+/** 有效历史不依赖当前房主或在线成员身份。 */
+export async function listHistory(userId: string): Promise<RoomHistory[]> {
+  const rows = await repo.listHistory(userId)
+  const now = Date.now()
+  return rows
+    .filter(({ room }) => !room.expiresAt || room.expiresAt.getTime() > now)
+    .map(({ room, name, joined }) => ({
+      ...repo.roomDto(room, name),
+      lastJoinedAt: joined.toISOString(),
+    }))
+}
+
+/** 删除只撤销本人凭证，与新增历史复用 Repository 的用户事务锁。 */
+export function deleteHistory(userId: string, roomId: string) {
+  return repo.deleteHistory(userId, roomId)
+}
+
+/** 详情要求本人仍持有有效凭证，权限错误在业务层产生。 */
+export async function historyDetail(userId: string, roomId: string) {
+  const row = (await listHistory(userId)).find((item) => item.roomId === roomId)
+  if (!row) throw new BusinessError('ROOM_HISTORY_REQUIRED', '房间已到期或没有访问记录', 403)
+  return row
+}
 
 /** 可信身份只从 Better Auth 会话取得。 */
 export type RoomUser = { id: string; name: string; image?: string | null }
@@ -29,6 +106,7 @@ type LiveRoom = {
   timer?: ReturnType<typeof setTimeout>
   startTimer?: ReturnType<typeof setTimeout>
 }
+
 /** 广播只发送公共投影或对应用户的私有歌单，避免聊天携带五百首歌单。 */
 export type RoomNotice =
   | { type: 'state'; roomCode: string; state: Omit<RoomSnapshot, 'myPlaylist' | 'messages'> }
@@ -41,32 +119,6 @@ export type RoomNotice =
       reason: 'switched' | 'kicked' | 'dissolved'
     }
 
-/** 串行化相同键的异步操作，结束即释放键，不保留已完成请求。 */
-export class KeyedSerial {
-  private pending = new Map<string, Promise<unknown>>()
-  async run<T>(keys: string[], action: () => Promise<T>): Promise<T> {
-    const sorted = [...new Set(keys)].sort()
-    const run = (index: number): Promise<T> => {
-      if (index === sorted.length) return action()
-      const key = sorted[index]
-      const previous = this.pending.get(key) ?? Promise.resolve()
-      const next = previous.catch(() => undefined).then(() => run(index + 1))
-      this.pending.set(key, next)
-      void next
-        .finally(() => {
-          if (this.pending.get(key) === next) this.pending.delete(key)
-        })
-        .catch(() => undefined)
-      return next
-    }
-    return run(0)
-  }
-  /** 退出前等待断开处理与在途数据库操作完成。 */
-  async drain() {
-    while (this.pending.size) await Promise.allSettled([...this.pending.values()])
-  }
-}
-
 /** 独立 Socket 服务持有的房间协调器；曲库查询委托 Web 实例。 */
 export class RoomService {
   private revision = 0
@@ -76,33 +128,44 @@ export class RoomService {
   private serial = new KeyedSerial()
   private chatLimits = new Map<string, number[]>()
   private sweepTimer?: ReturnType<typeof setInterval>
-  constructor(
-    private readonly resolveTrack: (reference: RoomCommands['room:playlist:add']) => Promise<Track>,
-    private readonly notify: (notice: RoomNotice) => void,
-  ) {}
+  private readonly upstream
+
+  /** 房间业务自行持有 Web 曲库客户端，Socket 只注入传输通知。 */
+  constructor(private readonly notify: (notice: RoomNotice) => void) {
+    const config = z
+      .object({
+        ROOM_INTERNAL_SECRET: z.string().min(32),
+        ROOM_WEB_URL: z.url().optional(),
+      })
+      .parse(process.env)
+    this.upstream = axios.create({
+      baseURL: config.ROOM_WEB_URL ?? readServerEnv().BETTER_AUTH_URL,
+      proxy: false,
+      timeout: 16_000,
+      responseType: 'json',
+      transitional: { silentJSONParsing: false },
+      headers: { 'x-pool-room-secret': config.ROOM_INTERNAL_SECRET },
+      validateStatus: () => true,
+    })
+  }
+
+  /** 通过 Web 内部音乐入口获取权威资料，外部缓存和预算仍只由 Web 维护。 */
+  private async resolveTrack(reference: RoomCommands['room:playlist:add']): Promise<Track> {
+    const response = await this.upstream.post('/api/internal/room-track', reference)
+    if (!response.data?.ok)
+      throw new BusinessError(
+        response.data?.error?.code ?? 'UPSTREAM_UNAVAILABLE',
+        response.data?.error?.message ?? '音乐服务暂时不可用',
+        response.status >= 400 ? response.status : 502,
+      )
+    return trackSchema.parse(response.data.data)
+  }
 
   /** 启动时丢弃在线投影，并保留原先为空房间的截止时间。 */
   async start() {
-    await db.transaction(async (tx) => {
-      await tx.update(roomMembers).set({ leftAt: new Date() }).where(isNull(roomMembers.leftAt))
-      await tx
-        .update(rooms)
-        .set({ memberCount: 0, emptyExpiresAt: new Date(Date.now() + repo.EMPTY_ROOM_MS) })
-        .where(and(eq(rooms.status, 'active'), sql`${rooms.memberCount} > 0`))
-      const states = await tx.select().from(roomPlaybackStates)
-      for (const state of states)
-        await tx
-          .update(roomPlaybackStates)
-          .set({
-            activeIndex: -1,
-            playback: this.idle(
-              state.playback.roomId,
-              state.playback.roomCode,
-              state.playback.version + 1,
-            ),
-          })
-          .where(eq(roomPlaybackStates.roomId, state.roomId))
-    })
+    await repo.resetOnlineState(new Date(Date.now() + EMPTY_ROOM_MS), (saved) =>
+      this.idle(saved.roomId, saved.roomCode, saved.version + 1),
+    )
     await this.sweep()
     this.sweepTimer = setInterval(
       () => void this.sweep().catch(() => console.error('[rooms] 到期清理失败')),
@@ -139,20 +202,15 @@ export class RoomService {
       skipVoteRequired: 0,
     }
   }
+
   /** 按需加载房间；磁盘时间轴只用于保留递增版本。 */
   private async load(code: string) {
     let live = this.live.get(code)
     if (live) return live
     const row = await repo.findRoom(code)
-    if (
-      !row ||
-      row.status !== 'active' ||
-      (!row.memberCount && row.emptyExpiresAt.getTime() <= Date.now())
-    )
+    if (!row || !isActiveRoom(row))
       throw new BusinessError('ROOM_NOT_FOUND', '房间不存在或已结束', 404)
-    const saved = (
-      await db.select().from(roomPlaybackStates).where(eq(roomPlaybackStates.roomId, row.id))
-    )[0]
+    const saved = await repo.getPlayback(row.id)
     live = {
       row,
       members: new Map(),
@@ -163,6 +221,7 @@ export class RoomService {
     this.live.set(code, live)
     return live
   }
+
   /** 公共投影不含私有歌单和消息。 */
   private async state(live: LiveRoom) {
     const members: Member[] = [...live.members.values()].map((m) => ({
@@ -181,6 +240,7 @@ export class RoomService {
       revision: ++this.revision,
     }
   }
+
   /** 加入及命令确认读取本人私有歌单。 */
   private async snapshot(live: LiveRoom, userId: string): Promise<RoomSnapshot> {
     const [state, myPlaylist, messages] = await Promise.all([
@@ -190,19 +250,23 @@ export class RoomService {
     ])
     return { ...state, myPlaylist, messages }
   }
+
   /** 活动身份必须绑定到当前连接，不能仅信任 userId。 */
   private assertMember(socketId: string, userId: string, live: LiveRoom) {
     if (!live.members.get(userId)?.sockets.has(socketId))
       throw new BusinessError('NOT_IN_ROOM', '请先加入房间', 409)
   }
+
   /** 房主权限随活动房间流转。 */
   private assertOwner(live: LiveRoom, userId: string) {
     if (live.row.ownerId !== userId) throw new BusinessError('FORBIDDEN', '只有房主可以操作', 403)
   }
+
   /** 已提交的公共状态广播给该房间全部连接。 */
   private async broadcast(live: LiveRoom) {
     this.notify({ type: 'state', roomCode: live.row.code, state: await this.state(live) })
   }
+
   /** 用户歌单更新发到该用户全部房间连接。 */
   private async playlistChanged(userId: string) {
     this.notify({ type: 'playlist', userId, items: await repo.getPlaylist(userId) })
@@ -229,147 +293,221 @@ export class RoomService {
         [`1:room:${target}`, ...(oldCode ? [`1:room:${oldCode}`] : [])],
         async () => {
           const live = await this.load(target)
-          if (event === 'room:join' || event === 'room:switch') {
-            const currentCode = this.userRooms.get(user.id)
-            if (currentCode && currentCode !== target && event !== 'room:switch')
-              throw new BusinessError('ALREADY_IN_ROOM', '你已在其他房间，是否切换到此房间？', 409)
-            await repo.checkPassword(live.row, (payload as RoomCommands['room:join']).password)
-            const existing = live.members.get(user.id)
-            if (!existing && live.members.size >= live.row.maxMembers)
-              throw new BusinessError('ROOM_FULL', '房间人数已满', 409)
-            if (currentCode && currentCode !== target) {
-              const old = this.live.get(currentCode)!
-              const sockets = [...old.members.get(user.id)!.sockets]
-              await this.removeUser(old, user.id)
-              this.notify({
-                type: 'leave',
-                roomCode: currentCode,
-                socketIds: sockets,
-                reason: 'switched',
-              })
-            }
-            const member = existing ?? { user, joinedAt: new Date(), sockets: new Set<string>() }
-            await repo.recordJoin(
-              live.row,
-              user.id,
-              live.members.size + (existing ? 0 : 1),
-              member.joinedAt,
-            )
-            member.user = user
-            member.sockets.add(socketId)
-            live.members.set(user.id, member)
-            live.row.memberCount = live.members.size
-            live.row.lastActiveAt = new Date()
-            this.bindings.set(socketId, { userId: user.id, code: target })
-            this.userRooms.set(user.id, target)
-            this.updateVotes(live)
-            await this.broadcast(live)
-            return { snapshot: await this.snapshot(live, user.id) }
-          }
+          // 事件判定
+          if (event === 'room:join' || event === 'room:switch')
+            return this.joinRoom(live, socketId, user, event, payload as RoomCommands['room:join'])
           this.assertMember(socketId, user.id, live)
           if (event === 'room:leave') {
             await this.leaveSocket(live, socketId, user.id)
             return { snapshot: null }
           }
           let imported: RoomCommandResult['imported']
-          if (event === 'room:stage:join') {
-            if (!live.stage.includes(user.id)) {
-              if (live.stage.length >= live.row.maxStageMembers)
-                throw new BusinessError('STAGE_FULL', '上台人数已满', 409)
-              live.stage.push(user.id)
-              if (live.playback.status === 'idle') await this.advance(live)
-            }
-          } else if (event === 'room:stage:leave') {
-            const targetId = (payload as RoomCommands['room:stage:leave']).targetUserId ?? user.id
-            if (targetId !== user.id) this.assertOwner(live, user.id)
-            await this.removeStage(live, targetId)
-          } else if (event.startsWith('room:playlist:')) {
-            imported = await this.playlistCommand(live, user.id, event, payload)
-          } else if (event === 'room:chat:send') {
-            const now = Date.now(),
-              times = (this.chatLimits.get(user.id) ?? []).filter((t) => now - t < 10_000)
-            if (times.length >= 5)
-              throw new BusinessError(
-                'RATE_LIMITED',
-                '聊天过于频繁，请稍后再发',
-                429,
-                Math.max(1, Math.ceil((times[0] + 10_000 - now) / 1000)),
+          switch (event) {
+            case 'room:sync':
+              break
+            case 'room:stage:join':
+              await this.joinStage(live, user.id)
+              break
+            case 'room:stage:leave':
+              await this.leaveStage(live, user.id, payload as RoomCommands['room:stage:leave'])
+              break
+            case 'room:playlist:add':
+            case 'room:playlist:remove':
+            case 'room:playlist:reorder':
+            case 'room:playlist:shuffle':
+            case 'room:playlist:clear':
+            case 'room:playlist:import-liked':
+              imported = await this.playlistCommand(live, user.id, event, payload)
+              break
+            case 'room:chat:send':
+              await this.sendChat(live, user, (payload as RoomCommands['room:chat:send']).content)
+              break
+            case 'room:playback:skip':
+              if (live.playback.activeMemberId !== user.id)
+                throw new BusinessError('FORBIDDEN', '只有当前播放者可以直接切歌', 403)
+              await this.advance(live)
+              break
+            case 'room:playback:vote-skip':
+              await this.voteSkip(live, user.id)
+              break
+            case 'room:playback:media-error':
+              await this.reportMediaError(
+                live,
+                user.id,
+                payload as RoomCommands['room:playback:media-error'],
               )
-            times.push(now)
-            this.chatLimits.set(user.id, times)
-            const message = {
-              id: randomUUID(),
-              roomId: live.row.id,
-              senderId: user.id,
-              senderName: user.name,
-              content: (payload as RoomCommands['room:chat:send']).content,
-              createdAt: new Date().toISOString(),
-            }
-            await repo.appendMessage(message)
-            this.notify({ type: 'chat', roomCode: target, message })
-          } else if (event === 'room:playback:skip') {
-            if (live.playback.activeMemberId !== user.id)
-              throw new BusinessError('FORBIDDEN', '只有当前播放者可以直接切歌', 403)
-            await this.advance(live)
-          } else if (event === 'room:playback:vote-skip') {
-            if (!live.playback.track || live.playback.activeMemberId === user.id)
-              throw new BusinessError('FORBIDDEN', '当前不能投票', 403)
-            if (!live.playback.votes.includes(user.id)) live.playback.votes.push(user.id)
-            this.updateVotes(live)
-            if (live.playback.votes.length >= live.playback.skipVoteRequired)
-              await this.advance(live)
-          } else if (event === 'room:playback:media-error') {
-            const report = payload as RoomCommands['room:playback:media-error']
-            if (
-              live.playback.activeMemberId === user.id &&
-              live.playback.version === report.version &&
-              live.playback.currentItemId === report.itemId
-            )
-              await this.advance(live)
-          } else if (event === 'room:update-settings') {
-            this.assertOwner(live, user.id)
-            const settings = payload as RoomSettings
-            if (
-              settings.maxMembers < live.members.size ||
-              settings.maxStageMembers < live.stage.length
-            )
-              throw new BusinessError('ROOM_CAPACITY_CONFLICT', '人数上限不能小于当前人数', 409)
-            const passwordHash =
-              settings.passwordAction === 'keep'
-                ? live.row.passwordHash
-                : settings.passwordAction === 'remove'
-                  ? null
-                  : await hashPassword(settings.password!)
-            const [row] = await db
-              .update(rooms)
-              .set({
-                name: settings.name,
-                tag: settings.tag,
-                maxMembers: settings.maxMembers,
-                maxStageMembers: settings.maxStageMembers,
-                passwordHash,
-                lastActiveAt: new Date(),
-              })
-              .where(eq(rooms.id, live.row.id))
-              .returning()
-            live.row = row
-          } else if (event === 'room:kick-member') {
-            this.assertOwner(live, user.id)
-            const targetId = (payload as RoomCommands['room:kick-member']).targetUserId
-            if (targetId === user.id) throw new BusinessError('INVALID_INPUT', '不能移出自己', 400)
-            const sockets = [...(live.members.get(targetId)?.sockets ?? [])]
-            await this.removeUser(live, targetId)
-            this.notify({ type: 'leave', roomCode: target, socketIds: sockets, reason: 'kicked' })
-          } else if (event === 'room:dissolve') {
-            this.assertOwner(live, user.id)
-            await this.end(live)
-            return { snapshot: null }
+              break
+            case 'room:update-settings':
+              await this.updateSettings(live, user.id, payload as RoomSettings)
+              break
+            case 'room:kick-member':
+              await this.kickMember(
+                live,
+                user.id,
+                (payload as RoomCommands['room:kick-member']).targetUserId,
+              )
+              break
+            case 'room:dissolve':
+              this.assertOwner(live, user.id)
+              await this.end(live)
+              return { snapshot: null }
           }
           await this.broadcast(live)
           return { snapshot: await this.snapshot(live, user.id), ...(imported ? { imported } : {}) }
         },
       )
     })
+  }
+
+  /** 上台后仅在等待状态启动轮播，不打断当前节目。 */
+  private async joinStage(live: LiveRoom, userId: string) {
+    if (live.stage.includes(userId)) return
+    if (live.stage.length >= live.row.maxStageMembers)
+      throw new BusinessError('STAGE_FULL', '上台人数已满', 409)
+    live.stage.push(userId)
+    if (live.playback.status === 'idle') await this.advance(live)
+  }
+
+  /** 成员可自行下台，房主也可将其他成员移下台。 */
+  private async leaveStage(
+    live: LiveRoom,
+    userId: string,
+    input: RoomCommands['room:stage:leave'],
+  ) {
+    const targetId = input.targetUserId ?? userId
+    if (targetId !== userId) this.assertOwner(live, userId)
+    await this.removeStage(live, targetId)
+  }
+
+  /** 非播放者每人计一票，达到实时人数门槛后推进节目。 */
+  private async voteSkip(live: LiveRoom, userId: string) {
+    if (!live.playback.track || live.playback.activeMemberId === userId)
+      throw new BusinessError('FORBIDDEN', '当前不能投票', 403)
+    if (!live.playback.votes.includes(userId)) live.playback.votes.push(userId)
+    this.updateVotes(live)
+    if (live.playback.votes.length >= live.playback.skipVoteRequired) await this.advance(live)
+  }
+
+  /** 仅当前播放者对当前版本和条目的失败报告能推进房间。 */
+  private async reportMediaError(
+    live: LiveRoom,
+    userId: string,
+    report: RoomCommands['room:playback:media-error'],
+  ) {
+    if (
+      live.playback.activeMemberId === userId &&
+      live.playback.version === report.version &&
+      live.playback.currentItemId === report.itemId
+    )
+      await this.advance(live)
+  }
+
+  /** 密码与目标容量验证成功后才从旧房间切换，并记录成功加入历史。 */
+  private async joinRoom(
+    live: LiveRoom,
+    socketId: string,
+    user: RoomUser,
+    event: 'room:join' | 'room:switch',
+    payload: RoomCommands['room:join'],
+  ): Promise<RoomCommandResult> {
+    const currentCode = this.userRooms.get(user.id)
+    if (currentCode && currentCode !== live.row.code && event !== 'room:switch')
+      throw new BusinessError('ALREADY_IN_ROOM', '你已在其他房间，是否切换到此房间？', 409)
+    await this.checkPassword(live.row, payload.password)
+    const existing = live.members.get(user.id)
+    if (!existing && live.members.size >= live.row.maxMembers)
+      throw new BusinessError('ROOM_FULL', '房间人数已满', 409)
+    if (currentCode && currentCode !== live.row.code) {
+      const old = this.live.get(currentCode)!
+      const sockets = [...old.members.get(user.id)!.sockets]
+      await this.removeUser(old, user.id)
+      this.notify({
+        type: 'leave',
+        roomCode: currentCode,
+        socketIds: sockets,
+        reason: 'switched',
+      })
+    }
+    const member = existing ?? { user, joinedAt: new Date(), sockets: new Set<string>() }
+    await recordRoomJoin(live.row, user.id, live.members.size + (existing ? 0 : 1), member.joinedAt)
+    member.user = user
+    member.sockets.add(socketId)
+    live.members.set(user.id, member)
+    live.row.memberCount = live.members.size
+    live.row.lastActiveAt = new Date()
+    this.bindings.set(socketId, { userId: user.id, code: live.row.code })
+    this.userRooms.set(user.id, live.row.code)
+    this.updateVotes(live)
+    await this.broadcast(live)
+    return { snapshot: await this.snapshot(live, user.id) }
+  }
+
+  /** 房间密码检查只在 Service 执行，不向数据层传递密码原文。 */
+  private async checkPassword(row: repo.RoomRow, password?: string) {
+    if (
+      row.passwordHash &&
+      (!password || !(await verifyPassword({ hash: row.passwordHash, password })))
+    )
+      throw new BusinessError(
+        'ROOM_PASSWORD_REQUIRED',
+        password ? '房间密码不正确' : '请输入房间密码',
+        403,
+      )
+  }
+
+  /** 应用聊天频率限制，消息落库成功后才通知传输层广播。 */
+  private async sendChat(live: LiveRoom, user: RoomUser, content: string) {
+    const now = Date.now(),
+      times = (this.chatLimits.get(user.id) ?? []).filter((t) => now - t < 10_000)
+    if (times.length >= 5)
+      throw new BusinessError(
+        'RATE_LIMITED',
+        '聊天过于频繁，请稍后再发',
+        429,
+        Math.max(1, Math.ceil((times[0] + 10_000 - now) / 1000)),
+      )
+    times.push(now)
+    this.chatLimits.set(user.id, times)
+    const message = {
+      id: randomUUID(),
+      roomId: live.row.id,
+      senderId: user.id,
+      senderName: user.name,
+      content,
+      createdAt: new Date().toISOString(),
+    }
+    await repo.appendMessage(message)
+    this.notify({ type: 'chat', roomCode: live.row.code, message })
+  }
+
+  /** 房主设置先校验实时容量，再保存已处理的密码哈希。 */
+  private async updateSettings(live: LiveRoom, userId: string, settings: RoomSettings) {
+    this.assertOwner(live, userId)
+    if (settings.maxMembers < live.members.size || settings.maxStageMembers < live.stage.length)
+      throw new BusinessError('ROOM_CAPACITY_CONFLICT', '人数上限不能小于当前人数', 409)
+    const passwordHash =
+      settings.passwordAction === 'keep'
+        ? live.row.passwordHash
+        : settings.passwordAction === 'remove'
+          ? null
+          : await hashPassword(settings.password!)
+    live.row = await repo.updateRoom(live.row.id, {
+      name: settings.name,
+      tag: settings.tag,
+      maxMembers: settings.maxMembers,
+      maxStageMembers: settings.maxStageMembers,
+      passwordHash,
+      lastActiveAt: new Date(),
+    })
+  }
+
+  /** 房主移出成员后统一清理连接，并通过 notice 通知 Socket 退出。 */
+  private async kickMember(live: LiveRoom, userId: string, targetId: string) {
+    this.assertOwner(live, userId)
+    if (targetId === userId) throw new BusinessError('INVALID_INPUT', '不能移出自己', 400)
+    const sockets = [...(live.members.get(targetId)?.sockets ?? [])]
+    await this.removeUser(live, targetId)
+    this.notify({ type: 'leave', roomCode: live.row.code, socketIds: sockets, reason: 'kicked' })
   }
 
   /** 私有歌单命令以服务端规范资料和持久收藏为输入。 */
@@ -395,6 +533,8 @@ export class RoomService {
       if (track) {
         if (items.some((i) => trackKey(i.track) === trackKey(track!)))
           throw new BusinessError('TRACK_ALREADY_ADDED', '歌曲已在房间歌单中', 409)
+        if (items.length >= 500)
+          throw new BusinessError('PLAYLIST_LIMIT_REACHED', '房间歌单最多 500 首', 409)
         return [{ itemId: randomUUID(), position: 0, track }, ...items]
       }
       if (event === 'room:playlist:clear') return []
@@ -444,17 +584,31 @@ export class RoomService {
     if (live.playback.status === 'idle') await this.advance(live)
     return event === 'room:playlist:import-liked' ? stats : undefined
   }
+
   /** 以现有在线成员重新计算票数，离线用户的票不继续占位。 */
   private updateVotes(live: LiveRoom) {
     const eligible = [...live.members.keys()].filter((id) => id !== live.playback.activeMemberId)
     live.playback.votes = live.playback.votes.filter((id) => eligible.includes(id))
     live.playback.skipVoteRequired = live.playback.track ? eligible.length : 0
   }
+
+  /** 只持久化已经到达起播锚点的有效节目，不记录预加载。 */
+  private async recordPlayed(playback: Playback) {
+    if (
+      !playback.track ||
+      !playback.activeMemberId ||
+      !playback.startedAt ||
+      playback.startedAt > Date.now()
+    )
+      return
+    await repo.recordPlayed(playback)
+  }
+
   /** 自然结束、切歌和错误都走同一推进路径，一次最多扫描一轮上台成员。 */
   private async advance(live: LiveRoom, from = live.activeIndex) {
     clearTimeout(live.timer)
     clearTimeout(live.startTimer)
-    await repo.recordPlayed(live.playback)
+    await this.recordPlayed(live.playback)
     let next = this.idle(live.row.id, live.row.code, live.playback.version + 1),
       activeIndex = -1
     for (let step = 1; step <= live.stage.length; step++) {
@@ -494,7 +648,7 @@ export class RoomService {
         () =>
           void this.serial
             .run([`1:room:${live.row.code}`], async () => {
-              if (live.playback.version === version) await repo.recordPlayed(next)
+              if (live.playback.version === version) await this.recordPlayed(next)
             })
             .catch(() => console.error('[rooms] 播放记录写入失败')),
         Math.max(0, next.startedAt! - Date.now()),
@@ -512,6 +666,7 @@ export class RoomService {
       )
     }
   }
+
   /** 下台调整游标，当前播放者下台后立即轮到其后继。 */
   private async removeStage(live: LiveRoom, userId: string) {
     const index = live.stage.indexOf(userId)
@@ -521,6 +676,7 @@ export class RoomService {
     if (index <= live.activeIndex) live.activeIndex--
     if (current) await this.advance(live)
   }
+
   /** 移除用户全部连接，同时更新在线投影和房主。 */
   private async removeUser(live: LiveRoom, userId: string) {
     const member = live.members.get(userId)
@@ -530,27 +686,18 @@ export class RoomService {
         ? ([...live.members.keys()].find((id) => id !== userId) ?? userId)
         : live.row.ownerId
     const now = new Date()
-    await db.transaction(async (tx) => {
-      await tx
-        .update(roomMembers)
-        .set({ leftAt: now })
-        .where(and(eq(roomMembers.roomId, live.row.id), eq(roomMembers.userId, userId)))
-      await tx
-        .update(rooms)
-        .set({
-          memberCount: live.members.size - 1,
-          ownerId: nextOwner,
-          lastActiveAt: now,
-          ...(live.members.size === 1
-            ? { emptyExpiresAt: new Date(now.getTime() + repo.EMPTY_ROOM_MS) }
-            : {}),
-        })
-        .where(eq(rooms.id, live.row.id))
+    const row = await repo.recordLeave(live.row.id, userId, now, {
+      memberCount: live.members.size - 1,
+      ownerId: nextOwner,
+      lastActiveAt: now,
+      ...(live.members.size === 1
+        ? { emptyExpiresAt: new Date(now.getTime() + EMPTY_ROOM_MS) }
+        : {}),
     })
     for (const id of member.sockets) this.bindings.delete(id)
     live.members.delete(userId)
     this.userRooms.delete(userId)
-    live.row = (await repo.findRoom(live.row.code))!
+    live.row = row
     await this.removeStage(live, userId)
     this.updateVotes(live)
     if (
@@ -561,6 +708,7 @@ export class RoomService {
       await this.advance(live)
     await this.broadcast(live)
   }
+
   /** 单个标签页离开只删除自己的连接。 */
   private async leaveSocket(live: LiveRoom, socketId: string, userId: string) {
     const member = live.members.get(userId)
@@ -571,6 +719,7 @@ export class RoomService {
       this.bindings.delete(socketId)
     }
   }
+
   /** 断开和显式离开共用逻辑，重复调用不会重复推进。 */
   async disconnect(socketId: string) {
     const binding = this.bindings.get(socketId)
@@ -582,30 +731,13 @@ export class RoomService {
       }),
     )
   }
+
   /** 结束归档先持久化，再清理内存和通知所有连接。 */
   private async end(live: LiveRoom, endedAt = new Date()) {
-    await repo.recordPlayed(live.playback)
+    await this.recordPlayed(live.playback)
     const now = endedAt,
       playback = this.idle(live.row.id, live.row.code, live.playback.version + 1)
-    await db.transaction(async (tx) => {
-      await tx
-        .update(rooms)
-        .set({
-          status: 'ended',
-          memberCount: 0,
-          endedAt: now,
-          expiresAt: new Date(now.getTime() + repo.ARCHIVE_MS),
-        })
-        .where(eq(rooms.id, live.row.id))
-      await tx.update(roomMembers).set({ leftAt: now }).where(eq(roomMembers.roomId, live.row.id))
-      await tx
-        .insert(roomPlaybackStates)
-        .values({ roomId: live.row.id, playback, activeIndex: -1 })
-        .onConflictDoUpdate({
-          target: roomPlaybackStates.roomId,
-          set: { playback, activeIndex: -1 },
-        })
-    })
+    await repo.archiveRoom(live.row.id, now, new Date(now.getTime() + ARCHIVE_MS), playback)
     clearTimeout(live.timer)
     clearTimeout(live.startTimer)
     const socketIds = [...live.members.values()].flatMap((m) => [...m.sockets])
@@ -614,18 +746,10 @@ export class RoomService {
     this.live.delete(live.row.code)
     this.notify({ type: 'leave', roomCode: live.row.code, socketIds, reason: 'dissolved' })
   }
+
   /** 创建后一直无人加入的房间也参与到期归档。 */
   async sweep() {
-    const expired = await db
-      .select()
-      .from(rooms)
-      .where(
-        and(
-          eq(rooms.status, 'active'),
-          eq(rooms.memberCount, 0),
-          lt(rooms.emptyExpiresAt, new Date()),
-        ),
-      )
+    const expired = await repo.findEmptyRoomsBefore(new Date())
     for (const row of expired)
       await this.serial.run([`1:room:${row.code}`], async () => {
         const current = await repo.findRoom(row.code)
@@ -647,7 +771,7 @@ export class RoomService {
           current.emptyExpiresAt,
         )
       })
-    await db.delete(rooms).where(and(eq(rooms.status, 'ended'), lt(rooms.expiresAt, new Date())))
+    await repo.deleteArchivesBefore(new Date())
     for (const [id, times] of this.chatLimits)
       if (times.every((t) => Date.now() - t >= 10_000)) this.chatLimits.delete(id)
   }

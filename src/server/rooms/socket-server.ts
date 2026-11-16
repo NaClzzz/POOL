@@ -1,14 +1,12 @@
 import { createServer } from 'node:http'
-import axios from 'axios'
 import { Server } from 'socket.io'
 import { fromNodeHeaders } from 'better-auth/node'
 import { z } from 'zod'
 import { auth } from '../auth/core'
 import { BusinessError } from '../http/errors'
 import { readServerEnv } from '../env'
-import { trackSchema } from '../music/validation'
 import { commandSchemas } from './validation'
-import { RoomService, type RoomUser } from './service'
+import { RoomService, type RoomNotice, type RoomUser } from './service'
 import type {
   ClientRoomEvents,
   ServerRoomEvents,
@@ -17,23 +15,22 @@ import type {
   RoomCommandResult,
 } from '@/contracts/room'
 
-/** 独立进程配置；密钥缺失直接阻止服务启动。 */
+/** Socket 监听配置；内部音乐服务配置由 RoomService 管理。 */
 export function roomServerConfig() {
   return z
     .object({
       SOCKET_HOST: z.string().default('127.0.0.1'),
       SOCKET_PORT: z.coerce.number().int().min(1).max(65535).default(3002),
-      ROOM_INTERNAL_SECRET: z.string().min(32),
-      ROOM_WEB_URL: z.url().optional(),
     })
     .parse(process.env)
 }
+
 /** 创建可测试的 Socket 服务，不在模块导入时监听端口。 */
+// 服务端创建
 export async function createRoomSocketServer() {
   const env = readServerEnv(),
     config = roomServerConfig(),
     origin = new URL(env.BETTER_AUTH_URL).origin
-  const webUrl = config.ROOM_WEB_URL ?? env.BETTER_AUTH_URL
   const httpServer = createServer((req, res) => {
     res.writeHead(req.url === '/health' ? 200 : 404, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ ok: req.url === '/health' }))
@@ -48,42 +45,28 @@ export async function createRoomSocketServer() {
     maxHttpBufferSize: 16_384,
     allowRequest: (req, done) => done(null, !req.headers.origin || req.headers.origin === origin),
   })
-  const upstream = axios.create({
-    baseURL: webUrl,
-    proxy: false,
-    timeout: 16_000,
-    responseType: 'json',
-    transitional: { silentJSONParsing: false },
-    headers: { 'x-pool-room-secret': config.ROOM_INTERNAL_SECRET },
-    validateStatus: () => true,
-  })
-  const service = new RoomService(
-    async (reference) => {
-      const response = await upstream.post('/api/internal/room-track', reference)
-      if (!response.data?.ok)
-        throw new BusinessError(
-          response.data?.error?.code ?? 'UPSTREAM_UNAVAILABLE',
-          response.data?.error?.message ?? '音乐服务暂时不可用',
-          response.status >= 400 ? response.status : 502,
-        )
-      return trackSchema.parse(response.data.data)
-    },
-    (notice) => {
-      if (notice.type === 'state') io.to(`room:${notice.roomCode}`).emit('room:state', notice.state)
-      else if (notice.type === 'chat')
-        io.to(`room:${notice.roomCode}`).emit('room:message', notice.message)
-      else if (notice.type === 'playlist')
-        io.to(`user:${notice.userId}`).emit('user:room-playlist', notice.items)
-      else
-        for (const id of notice.socketIds) {
-          const socket = io.sockets.sockets.get(id)
-          if (socket) {
-            void socket.leave(`room:${notice.roomCode}`)
-            socket.emit('room:forced-leave', { roomCode: notice.roomCode, reason: notice.reason })
-          }
+
+  /** 所有 io 广播和连接退出集中在 Socket 入口。 */
+  const sendRoomNotice = (notice: RoomNotice) => {
+    if (notice.type === 'state') io.to(`room:${notice.roomCode}`).emit('room:state', notice.state)
+    else if (notice.type === 'chat')
+      io.to(`room:${notice.roomCode}`).emit('room:message', notice.message)
+    else if (notice.type === 'playlist')
+      io.to(`user:${notice.userId}`).emit('user:room-playlist', notice.items)
+    else
+      for (const id of notice.socketIds) {
+        const socket = io.sockets.sockets.get(id)
+        if (socket) {
+          void socket.leave(`room:${notice.roomCode}`)
+          socket.emit('room:forced-leave', { roomCode: notice.roomCode, reason: notice.reason })
         }
-    },
-  )
+      }
+  }
+
+  // 创建业务服务端，并注入广播回调函数
+  const service = new RoomService(sendRoomNotice)
+
+  // 鉴权中间件
   io.use(async (socket, next) => {
     try {
       const session = await auth.api.getSession({
@@ -100,11 +83,13 @@ export async function createRoomSocketServer() {
       next(new Error('无法验证账号会话'))
     }
   })
+
+  // 为每个连接定义处理逻辑
   io.on('connection', (socket) => {
     void socket.join(`user:${socket.data.user.id}`)
     let closed = false
     let checking = false
-    /** 每次命令查询真实会话，注销后的旧连接无法继续写入。 */
+    // 会话校验
     const checkSession = async () => {
       const session = await auth.api.getSession({
         headers: fromNodeHeaders(socket.request.headers),
@@ -126,7 +111,8 @@ export async function createRoomSocketServer() {
           checking = false
         })
     }, 60_000)
-    for (const name of Object.keys(commandSchemas) as (keyof RoomCommands)[]) {
+
+    for (const command of Object.keys(commandSchemas) as (keyof RoomCommands)[]) {
       /** 动态注册仍使用共享事件参数类型；参数只在此入口进行 Zod 校验。 */
       const handle = async (
         payload: unknown,
@@ -136,13 +122,14 @@ export async function createRoomSocketServer() {
         const requestId = randomRequestId()
         try {
           const user = await checkSession()
-          const parsed = commandSchemas[name].parse(payload)
+          const parsed = commandSchemas[command].parse(payload)
           if (closed) return
+          // 调用服务端执行函数
           const data = await service.execute(
             socket.id,
             user,
-            name,
-            parsed as RoomCommands[typeof name],
+            command,
+            parsed as RoomCommands[typeof command],
           )
           // disconnect 可能发生在曲库查询或数据库等待中，晚完成的 join 必须撤销。
           if (closed) {
@@ -180,7 +167,7 @@ export async function createRoomSocketServer() {
           }
         }
       }
-      socket.on(name, handle)
+      socket.on(command, handle)
     }
     socket.on('disconnect', () => {
       closed = true
@@ -188,7 +175,9 @@ export async function createRoomSocketServer() {
       void service.disconnect(socket.id).catch(() => console.error('[rooms] 断开清理失败'))
     })
   })
+
   await service.start()
+
   return {
     httpServer,
     io,

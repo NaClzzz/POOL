@@ -18,7 +18,7 @@ export type PlaybackResource = {
 }
 /** 无歌词使用 null，区别于上游请求失败。 */
 export type Lyrics = { lrc: string | null; translationLrc: string | null }
-/** 歌单引用与本次读取的曲目页。 */
+/** 获取歌单与本次读取的页。 */
 export type PlaylistTracks = {
   playlist: {
     source: Track['source']

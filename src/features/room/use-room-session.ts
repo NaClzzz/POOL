@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation'
 import { createRoomSocket, sendRoomCommand, RoomCommandError } from '@/lib/socket-client'
 import { useSession } from '@/stores/session'
 import { usePlayer } from '@/stores/player'
-import type { RoomCommands, RoomSnapshot } from '@/contracts/room'
+import type { RoomCommands, RoomSnapshot, ServerRoomEvents } from '@/contracts/room'
 
 /** 页面作用域实时状态，不持久化且不进入 Query 缓存。 */
 type SessionState = {
@@ -16,6 +16,7 @@ type SessionState = {
   error: Error | null
   clockOffset: number
 }
+
 /** 房间连接生命周期、广播投影和命令错误集中于单个 hook。 */
 export function useRoomSession(code: string) {
   const [store] = useState(() =>
@@ -26,17 +27,19 @@ export function useRoomSession(code: string) {
       clockOffset: 0,
     })),
   )
+
   const state = useStore(store)
-  const socket = useRef<ReturnType<typeof createRoomSocket> | null>(null)
-  const password = useRef('')
+  const socketRef = useRef<ReturnType<typeof createRoomSocket> | null>(null)
+  const passwordRef = useRef('')
   const switchConfirmed = useRef(false)
-  const router = useRouter(),
-    client = useQueryClient()
+  const router = useRouter()
+  const client = useQueryClient()
   const userId = useSession((s) => s.user?.id)
   const [commandError, setCommandError] = useState('')
   const [notice, setNotice] = useState('')
-  /** 接收本人完整快照，房间和版本必须仍匹配。 */
-  const apply = useCallback(
+
+  /** 统一检查完整快照的房间、播放版本和修订号；重新加入允许接收重建状态。 */
+  const applySnapshot = useCallback(
     (snapshot: RoomSnapshot, offset?: number, freshJoin = false) => {
       if (snapshot.room.roomCode !== code) return
       const old = store.getState().snapshot
@@ -56,12 +59,34 @@ export function useRoomSession(code: string) {
     },
     [code, store],
   )
+
+  /** 确认超时只同步状态；加入恢复额外校准时间并刷新历史，不重放原命令。 */
+  const syncRoom = useCallback(
+    (socket: ReturnType<typeof createRoomSocket>, freshJoin = false) => {
+      const sent = Date.now()
+      return sendRoomCommand(socket, 'room:sync', {})
+        .then((result) => {
+          if (socketRef.current !== socket || !result.snapshot) return
+          const offset = freshJoin
+            ? result.snapshot.serverTime - (sent + Date.now()) / 2
+            : undefined
+          applySnapshot(result.snapshot, offset, freshJoin)
+          if (freshJoin) {
+            switchConfirmed.current = false
+            void client.invalidateQueries({ queryKey: ['room-history', userId] })
+          }
+        })
+        .catch(() => undefined)
+    },
+    [applySnapshot, client, userId],
+  )
+
   /** 首次加入和每次重连都获取完整快照，不恢复客户端猜测的队列。 */
   const join = useCallback(
-    async (secret: string, switching = false) => {
-      const connection = socket.current
-      if (!connection?.connected) return
-      password.current = secret
+    async (password: string, switching = false) => {
+      const socket = socketRef.current
+      if (!socket?.connected) return
+      passwordRef.current = password
       if (switching) switchConfirmed.current = true
       store.setState({
         error: null,
@@ -69,64 +94,56 @@ export function useRoomSession(code: string) {
       })
       const sent = Date.now()
       try {
+        // 发送 join 请求
         const result = await sendRoomCommand(
-          connection,
+          socket,
           switchConfirmed.current ? 'room:switch' : 'room:join',
           {
             roomCode: code,
-            ...(secret ? { password: secret } : {}),
+            ...(password ? { password } : {}),
           },
         )
-        if (socket.current !== connection) return
+        if (socketRef.current !== socket) return
         if (result.snapshot) {
-          apply(result.snapshot, result.snapshot.serverTime - (sent + Date.now()) / 2, true)
+          applySnapshot(result.snapshot, result.snapshot.serverTime - (sent + Date.now()) / 2, true)
           switchConfirmed.current = false
         }
         void client.invalidateQueries({ queryKey: ['room-history', userId] })
       } catch (error) {
-        if (socket.current !== connection) return
+        if (socketRef.current !== socket) return
         store.setState({ error: error as Error })
-        if (
-          error instanceof RoomCommandError &&
-          error.code === 'ACK_TIMEOUT' &&
-          connection.connected
-        ) {
-          const syncSent = Date.now()
-          void sendRoomCommand(connection, 'room:sync', {})
-            .then((result) => {
-              if (socket.current !== connection || !result.snapshot) return
-              apply(result.snapshot, result.snapshot.serverTime - (syncSent + Date.now()) / 2, true)
-              switchConfirmed.current = false
-              void client.invalidateQueries({ queryKey: ['room-history', userId] })
-            })
-            .catch(() => undefined)
+        if (error instanceof RoomCommandError && error.code === 'ACK_TIMEOUT' && socket.connected) {
+          void syncRoom(socket, true)
         }
       }
     },
-    [apply, client, code, store, userId],
+    [applySnapshot, client, code, store, syncRoom, userId],
   )
+
   useEffect(() => {
     if (!userId) return
-    const connection = createRoomSocket()
-    socket.current = connection
-    connection.on('connect', () => void join(password.current))
-    connection.on('disconnect', () => {
+    // 建立连接，得到 Socket 实例
+    const socket = createRoomSocket()
+    socketRef.current = socket
+
+    // 注册 socket 事件函数
+    /** 建连后重新加入，复用已确认的密码和切房意图。 */
+    const handleConnect = () => void join(passwordRef.current)
+    /** 暂时断线保留快照，停止房间音频并等待当前页面内重连。 */
+    const handleDisconnect = () => {
       store.setState({ connection: 'reconnecting' })
       usePlayer.getState().setRoom(false)
-    })
-    connection.on('connect_error', (error) => store.setState({ error }))
-    connection.on('room:state', (incoming) => {
+    }
+    /** 连接错误沿用会话错误展示。 */
+    const handleConnectError = (error: Error) => store.setState({ error })
+    /** 公共状态只能合并进已有完整快照，保留本人歌单和独立维护的聊天。 */
+    const handleRoomState: ServerRoomEvents['room:state'] = (incoming) => {
       const current = store.getState().snapshot
-      if (
-        incoming.room.roomCode !== code ||
-        !current ||
-        incoming.playback.version < current.playback.version ||
-        incoming.revision < current.revision
-      )
-        return
-      apply({ ...current, ...incoming })
-    })
-    connection.on('room:message', (message) => {
+      if (!current) return
+      applySnapshot({ ...current, ...incoming })
+    }
+    /** 消息按房间身份接收并以消息 ID 去重，只保留最近两百条。 */
+    const handleMessage: ServerRoomEvents['room:message'] = (message) => {
       const current = store.getState().snapshot
       if (
         !current ||
@@ -137,44 +154,59 @@ export function useRoomSession(code: string) {
       store.setState({
         snapshot: { ...current, messages: [...current.messages, message].slice(-200) },
       })
-    })
-    connection.on('user:room-playlist', (items) => {
+    }
+    /** 私有歌单事件独立更新，不覆盖房间公共状态和消息。 */
+    const handlePlaylist: ServerRoomEvents['user:room-playlist'] = (items) => {
       const current = store.getState().snapshot
       if (current) store.setState({ snapshot: { ...current, myPlaylist: items } })
-    })
-    connection.on('room:forced-leave', (event) => {
-      if (event.roomCode && event.roomCode !== code) return
-      connection.disconnect()
-      password.current = ''
+    }
+    /** 当前房间强退时清理凭据、停止播放并返回大厅。 */
+    const handleForcedLeave: ServerRoomEvents['room:forced-leave'] = (payload) => {
+      if (payload.roomCode && payload.roomCode !== code) return
+      socket.disconnect()
+      passwordRef.current = ''
       switchConfirmed.current = false
       store.setState({ snapshot: null })
       usePlayer.getState().setRoom(false)
       void client.invalidateQueries({ queryKey: ['room-history', userId] })
       router.replace('/rooms')
-    })
-    connection.connect()
+    }
+
+    socket.on('connect', handleConnect)
+    socket.on('disconnect', handleDisconnect)
+    socket.on('connect_error', handleConnectError)
+    socket.on('room:state', handleRoomState)
+    socket.on('room:message', handleMessage)
+    socket.on('user:room-playlist', handlePlaylist)
+    socket.on('room:forced-leave', handleForcedLeave)
+    socket.connect()
+
     return () => {
-      socket.current = null
-      if (connection.connected) connection.emit('room:leave', {}, () => undefined)
-      connection.removeAllListeners()
-      connection.disconnect()
-      password.current = ''
+      socketRef.current = null
+      if (socket.connected) socket.emit('room:leave', {}, () => undefined)
+      socket.removeAllListeners()
+      socket.disconnect()
+      passwordRef.current = ''
       switchConfirmed.current = false
       store.setState({ snapshot: null, error: null, connection: 'joining' })
       usePlayer.getState().setRoom(false)
       void client.invalidateQueries({ queryKey: ['rooms', userId] })
       void client.invalidateQueries({ queryKey: ['room-history', userId] })
     }
-  }, [apply, client, code, join, router, store, userId])
+  }, [applySnapshot, client, code, join, router, store, userId])
+
   /** 失败时保留表单草稿；确认超时只查询状态，不重发写操作。 */
   const command = useCallback(
-    async <K extends keyof RoomCommands>(name: K, payload: RoomCommands[K]): Promise<boolean> => {
-      const connection = socket.current
-      if (!connection) return false
+    async <K extends keyof RoomCommands>(
+      eventName: K,
+      payload: RoomCommands[K],
+    ): Promise<boolean> => {
+      const socket = socketRef.current
+      if (!socket) return false
       try {
-        const result = await sendRoomCommand(connection, name, payload)
-        if (socket.current !== connection) return false
-        if (result.snapshot) apply(result.snapshot)
+        const result = await sendRoomCommand(socket, eventName, payload)
+        if (socketRef.current !== socket) return false
+        if (result.snapshot) applySnapshot(result.snapshot)
         setCommandError('')
         if (result.imported)
           setNotice(
@@ -182,23 +214,15 @@ export function useRoomSession(code: string) {
           )
         return true
       } catch (error) {
-        if (socket.current !== connection) return false
+        if (socketRef.current !== socket) return false
         setCommandError((error as Error).message)
-        if (
-          error instanceof RoomCommandError &&
-          error.code === 'ACK_TIMEOUT' &&
-          connection.connected
-        ) {
-          void sendRoomCommand(connection, 'room:sync', {})
-            .then((result) => {
-              if (socket.current === connection && result.snapshot) apply(result.snapshot)
-            })
-            .catch(() => undefined)
+        if (error instanceof RoomCommandError && error.code === 'ACK_TIMEOUT' && socket.connected) {
+          void syncRoom(socket)
         }
         return false
       }
     },
-    [apply],
+    [applySnapshot, syncRoom],
   )
   return { ...state, commandError, notice, command, join, leave: () => router.push('/rooms') }
 }

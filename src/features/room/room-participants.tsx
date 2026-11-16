@@ -3,14 +3,10 @@ import { ArrowDown, ArrowUp, AudioLines, Crown } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarGroup } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { useSession } from '@/stores/session'
-import type { RoomSnapshot, RoomCommands } from '@/contracts/room'
+import type { RoomSnapshot } from '@/contracts/room'
+import type { RoomCommand } from './types'
 import styles from './room-page.module.css'
 
-/** 子组件只提交命令，不直接持有 Socket。 */
-export type RoomCommand = <K extends keyof RoomCommands>(
-  name: K,
-  payload: RoomCommands[K],
-) => Promise<boolean>
 /** 在线成员与上台顺序分别展示，房主可让其他成员下台。 */
 export function RoomParticipants({
   snapshot,

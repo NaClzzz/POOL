@@ -1,7 +1,8 @@
+import { paginationSchema } from '@/server/http/validation'
 import { z } from 'zod'
 import { businessRequest } from '../http/business'
 import { likesService } from './service'
-import { paginationSchema, sourceSchema, trackSchema, neteasePlaylistId } from '../music/validation'
+import { sourceSchema, trackSchema, neteasePlaylistId } from '../music/validation'
 import { musicLimit } from '../music/runtime'
 
 /** 收藏 HTTP 入口独立取可信身份，不接受请求提供的用户 ID。 */

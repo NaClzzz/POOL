@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RoomSnapshot } from '@/contracts/room'
+import { catalog } from './fixtures/tracks'
 
 const mocks = vi.hoisted(() => ({
   userId: 'a',
@@ -95,6 +96,15 @@ const snapshot: RoomSnapshot = {
   serverTime: Date.now(),
   revision: 1,
 }
+/** 公共广播没有本人歌单或消息，不能用于构造首次加入快照。 */
+const publicState = {
+  room: snapshot.room,
+  members: snapshot.members,
+  stageIds: snapshot.stageIds,
+  playback: snapshot.playback,
+  serverTime: snapshot.serverTime,
+  revision: snapshot.revision,
+}
 /** 捕获 hook 结果只在 effect 中进行，不在 render 写外部变量。 */
 function Probe() {
   const result = useRoomSession('code')
@@ -131,6 +141,7 @@ afterEach(async () => {
   await act(async () => root.unmount())
   query.clear()
   host.remove()
+  vi.restoreAllMocks()
 })
 describe('房间会话生命周期', () => {
   it('加入后接收状态和消息，拒绝其他房间及旧节目，消息 ID 去重', async () => {
@@ -157,6 +168,138 @@ describe('房间会话生命周期', () => {
       socket.fire('room:message', { ...message, id: 'other', roomId: 'other' })
     })
     expect(current.snapshot?.messages.length).toBe(1)
+  })
+  it('公共广播不建立首次快照，合并后保留私有数据且重渲染不重新连接', async () => {
+    let finish!: (value: { snapshot: RoomSnapshot }) => void
+    mocks.send.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    )
+    await mount()
+    const socket = sockets[0]
+    await act(async () => socket.fire('room:state', publicState))
+    expect(current.snapshot).toBeNull()
+    expect(mocks.setRoom).not.toHaveBeenCalledWith(true)
+    await act(async () => finish({ snapshot }))
+    const playlist = [{ itemId: 'item', position: 0, track: catalog[0] }]
+    const message = {
+      id: 'm',
+      roomId: 'r',
+      senderId: 'a',
+      senderName: 'A',
+      content: '你好',
+      createdAt: new Date().toISOString(),
+    }
+    await act(async () => {
+      socket.fire('user:room-playlist', playlist)
+      socket.fire('room:message', message)
+      socket.fire('room:state', {
+        ...publicState,
+        room: { ...snapshot.room, name: '最新名称' },
+        playback: { ...snapshot.playback, version: 2 },
+        revision: 2,
+      })
+      socket.fire('room:state', {
+        ...publicState,
+        room: { ...snapshot.room, roomCode: 'other' },
+        revision: 100,
+      })
+      socket.fire('room:state', { ...publicState, revision: 3 })
+      socket.fire('room:state', {
+        ...publicState,
+        playback: { ...snapshot.playback, version: 3 },
+        revision: 1,
+      })
+    })
+    expect(current.snapshot?.room.name).toBe('最新名称')
+    expect(current.snapshot?.playback.version).toBe(2)
+    expect(current.snapshot?.revision).toBe(2)
+    expect(current.snapshot?.myPlaylist).toEqual(playlist)
+    expect(current.snapshot?.messages).toEqual([message])
+    await mount()
+    expect(mocks.create).toHaveBeenCalledTimes(1)
+    expect(mocks.send).toHaveBeenCalledTimes(1)
+    expect([...socket.handlers.values()].every((handlers) => handlers.length === 1)).toBe(true)
+  })
+  it('加入超时同步校准时间并接受重建状态，清除切房意图并刷新历史', async () => {
+    await mount()
+    await act(async () => sockets[0].fire('room:state', { ...publicState, revision: 100 }))
+    const invalidate = vi.spyOn(query, 'invalidateQueries')
+    vi.spyOn(Date, 'now').mockReturnValue(100_000)
+    mocks.send.mockRejectedValueOnce(new RoomCommandError('ACK_TIMEOUT', '确认超时'))
+    mocks.send.mockResolvedValueOnce({ snapshot: { ...snapshot, serverTime: 105_000 } })
+    await act(async () => current.join('password', true))
+    expect(current.snapshot?.revision).toBe(1)
+    expect(current.clockOffset).toBe(5000)
+    expect(current.error).toBeNull()
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['room-history', 'a'] })
+    expect(mocks.send.mock.calls.filter((call) => call[1] === 'room:switch')).toHaveLength(1)
+    expect(mocks.send.mock.calls.filter((call) => call[1] === 'room:sync')).toHaveLength(1)
+    await act(async () => current.join('password'))
+    expect(mocks.send.mock.calls.at(-1)?.[1]).toBe('room:join')
+    expect(sockets).toHaveLength(1)
+  })
+  it('普通命令超时同步拒绝旧状态，不重新校时或刷新历史', async () => {
+    await mount()
+    const originalOffset = current.clockOffset
+    const invalidate = vi.spyOn(query, 'invalidateQueries')
+    await act(async () => sockets[0].fire('room:state', { ...publicState, revision: 100 }))
+    mocks.send.mockRejectedValueOnce(new RoomCommandError('ACK_TIMEOUT', '确认超时'))
+    mocks.send.mockResolvedValueOnce({ snapshot: { ...snapshot, serverTime: 1 } })
+    await act(async () => current.command('room:playlist:clear', {}))
+    expect(current.snapshot?.revision).toBe(100)
+    expect(current.clockOffset).toBe(originalOffset)
+    expect(current.commandError).toBe('确认超时')
+    expect(invalidate).not.toHaveBeenCalled()
+    expect(mocks.send.mock.calls.filter((call) => call[1] === 'room:playlist:clear')).toHaveLength(
+      1,
+    )
+    expect(mocks.send.mock.calls.filter((call) => call[1] === 'room:sync')).toHaveLength(1)
+  })
+  it.each(['join', 'command'] as const)(
+    '%s 超时后的同步失败保留原错误且不循环重试',
+    async (kind) => {
+      await mount()
+      mocks.send.mockClear()
+      mocks.send.mockRejectedValueOnce(new RoomCommandError('ACK_TIMEOUT', '确认超时'))
+      mocks.send.mockRejectedValueOnce(new RoomCommandError('NOT_IN_ROOM', '同步失败'))
+      await act(async () => {
+        if (kind === 'join') await current.join('')
+        else await current.command('room:chat:send', { content: 'hello' })
+      })
+      expect(kind === 'join' ? current.error?.message : current.commandError).toBe('确认超时')
+      expect(mocks.send.mock.calls.map((call) => call[1])).toEqual([
+        kind === 'join' ? 'room:join' : 'room:chat:send',
+        'room:sync',
+      ])
+    },
+  )
+  it.each(['join', 'command'] as const)('%s 超时后的同步忽略换号前连接的晚到结果', async (kind) => {
+    await mount()
+    mocks.send.mockRejectedValueOnce(new RoomCommandError('ACK_TIMEOUT', '确认超时'))
+    let finish!: (value: { snapshot: RoomSnapshot }) => void
+    mocks.send.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    )
+    await act(async () => {
+      if (kind === 'join') await current.join('')
+      else await current.command('room:chat:send', { content: 'hello' })
+    })
+    mocks.userId = 'b'
+    await mount()
+    const latest = current.snapshot
+    const invalidate = vi.spyOn(query, 'invalidateQueries')
+    mocks.setRoom.mockClear()
+    await act(async () => finish({ snapshot: { ...snapshot, revision: 999 } }))
+    expect(current.snapshot).toBe(latest)
+    expect(invalidate).not.toHaveBeenCalled()
+    expect(mocks.setRoom).not.toHaveBeenCalledWith(true)
+    expect(sockets).toHaveLength(2)
   })
   it('断线停音，重连重新加入取快照，卸载移除监听及连接', async () => {
     await mount()

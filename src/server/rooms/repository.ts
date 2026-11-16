@@ -1,6 +1,5 @@
-import { randomBytes, randomUUID } from 'node:crypto'
-import { hashPassword, verifyPassword } from 'better-auth/crypto'
-import { and, eq, desc, asc, gt, or, isNull, ilike, inArray, sql } from 'drizzle-orm'
+import { randomUUID } from 'node:crypto'
+import { and, eq, lt, desc, asc, gt, gte, or, isNull, ilike, inArray, sql } from 'drizzle-orm'
 import { db } from '../db'
 import { user } from '../db/schema'
 import { likedSongs } from '../db/likes-schema'
@@ -13,21 +12,11 @@ import {
   roomMessages,
   roomPlayedSongs,
 } from '../db/rooms-schema'
-import { BusinessError } from '../http/errors'
-import type {
-  CreateRoom,
-  Room,
-  RoomHistory,
-  RoomPlaylistItem,
-  Playback,
-  ChatMessage,
-} from '@/contracts/room'
 import type { Track } from '@/contracts/domain'
+import type { Room, RoomPlaylistItem, Playback, ChatMessage } from '@/contracts/room'
 
 /** 房间数据库行仅在服务端使用。 */
 export type RoomRow = typeof rooms.$inferSelect
-export const EMPTY_ROOM_MS = 30 * 60_000
-export const ARCHIVE_MS = 7 * 24 * 60 * 60_000
 /** 显式投影安全字段，不展开数据库行。 */
 export function roomDto(row: RoomRow, ownerName: string): Room {
   return {
@@ -60,47 +49,42 @@ export async function safeRoom(row: RoomRow) {
       '',
   )
 }
-/** 创建和历史操作复用用户行锁，跨 Web/Socket 进程协调。 */
-export async function createRoom(userId: string, input: CreateRoom) {
-  const passwordHash = input.password ? await hashPassword(input.password) : null
+/** 创建参数由 Service 准备；用户锁内检查已有记录，防止跨进程重复创建。 */
+export async function createRoom(
+  input: typeof rooms.$inferInsert,
+  assertCanCreate: (owned: RoomRow[]) => void,
+) {
   return db.transaction(async (tx) => {
-    await tx.select({ id: user.id }).from(user).where(eq(user.id, userId)).for('update')
-    const existing = await tx
-      .select()
-      .from(rooms)
-      .where(
-        and(
-          eq(rooms.ownerId, userId),
-          eq(rooms.status, 'active'),
-          or(gt(rooms.memberCount, 0), gt(rooms.emptyExpiresAt, new Date())),
-        ),
-      )
-    if (existing.length)
-      throw new BusinessError('ROOM_ALREADY_CREATED', '你已有有效房间，请进入我的房间', 409)
-    const [row] = await tx
-      .insert(rooms)
-      .values({
-        id: randomUUID(),
-        code: `pool-${randomBytes(8).toString('hex')}`,
-        ownerId: userId,
-        createdBy: userId,
-        name: input.name,
-        tag: input.tag,
-        maxMembers: input.maxMembers,
-        maxStageMembers: input.maxStageMembers,
-        passwordHash,
-        emptyExpiresAt: new Date(Date.now() + EMPTY_ROOM_MS),
-      })
-      .returning()
-    return safeRoom(row)
+    await tx.select({ id: user.id }).from(user).where(eq(user.id, input.ownerId)).for('update')
+    const owned = await tx.select().from(rooms).where(eq(rooms.ownerId, input.ownerId))
+    assertCanCreate(owned)
+    const [row] = await tx.insert(rooms).values(input).returning()
+    return row
   })
 }
-/** 大厅只列公开活动房；输入完整房间号时可取得密码房安全摘要。 */
-export async function listRooms(userId: string, q: string, offset: number, limit: number) {
+/** Service 提供大厅有效性和密码房可见策略，数据层仅转换成 SQL 条件。 */
+export type RoomListPolicy = {
+  status: RoomRow['status']
+  minMemberCount: number
+  emptyExpiresAfter: Date
+  publicOnly: boolean
+}
+/** 先在数据库按策略筛选再分页，避免 Service 过滤后遗漏下一页。 */
+export async function listRooms(
+  userId: string,
+  q: string,
+  offset: number,
+  limit: number,
+  policy: RoomListPolicy,
+) {
   const active = and(
-    eq(rooms.status, 'active'),
-    or(gt(rooms.memberCount, 0), gt(rooms.emptyExpiresAt, new Date())),
+    eq(rooms.status, policy.status),
+    or(
+      gte(rooms.memberCount, policy.minMemberCount),
+      gt(rooms.emptyExpiresAt, policy.emptyExpiresAfter),
+    ),
   )
+  const visibility = policy.publicOnly ? isNull(rooms.passwordHash) : undefined
   const rows = await db
     .select()
     .from(rooms)
@@ -110,12 +94,9 @@ export async function listRooms(userId: string, q: string, offset: number, limit
         q
           ? or(
               eq(rooms.code, q),
-              and(
-                isNull(rooms.passwordHash),
-                or(ilike(rooms.name, `%${q}%`), ilike(rooms.tag, `%${q}%`)),
-              ),
+              and(visibility, or(ilike(rooms.name, `%${q}%`), ilike(rooms.tag, `%${q}%`))),
             )
-          : isNull(rooms.passwordHash),
+          : visibility,
       ),
     )
     .orderBy(desc(rooms.lastActiveAt), asc(rooms.id))
@@ -140,20 +121,14 @@ export async function listRooms(userId: string, q: string, offset: number, limit
     myRoom: mine ? await safeRoom(mine) : null,
   }
 }
-/** 密码检查在变更旧房间之前完成。 */
-export async function checkPassword(row: RoomRow, password?: string) {
-  if (
-    row.passwordHash &&
-    (!password || !(await verifyPassword({ hash: row.passwordHash, password })))
-  )
-    throw new BusinessError(
-      'ROOM_PASSWORD_REQUIRED',
-      password ? '房间密码不正确' : '请输入房间密码',
-      403,
-    )
-}
-/** 成功加入时原子保存投影和历史，并淘汰超出五十条的凭证。 */
-export async function recordJoin(row: RoomRow, userId: string, count: number, joinedAt: Date) {
+/** 用户锁内原子保存投影与历史；淘汰哪些凭证由 Service 决定。 */
+export async function recordJoin(
+  row: RoomRow,
+  userId: string,
+  count: number,
+  joinedAt: Date,
+  selectHistoryToRemove: (roomIds: string[]) => string[],
+) {
   await db.transaction(async (tx) => {
     await tx.select({ id: user.id }).from(user).where(eq(user.id, userId)).for('update')
     await tx
@@ -175,38 +150,26 @@ export async function recordJoin(row: RoomRow, userId: string, count: number, jo
       .from(roomHistory)
       .where(eq(roomHistory.userId, userId))
       .orderBy(desc(roomHistory.lastJoinedAt), asc(roomHistory.roomId))
-      .offset(50)
-    if (old.length)
-      await tx.delete(roomHistory).where(
-        and(
-          eq(roomHistory.userId, userId),
-          inArray(
-            roomHistory.roomId,
-            old.map((r) => r.id),
-          ),
-        ),
-      )
+    const removed = selectHistoryToRemove(old.map((r) => r.id))
+    if (removed.length)
+      await tx
+        .delete(roomHistory)
+        .where(and(eq(roomHistory.userId, userId), inArray(roomHistory.roomId, removed)))
     await tx
       .update(rooms)
       .set({ memberCount: count, lastActiveAt: new Date() })
       .where(eq(rooms.id, row.id))
   })
 }
-/** 本人历史排除已经到期的归档。 */
-export async function listHistory(userId: string): Promise<RoomHistory[]> {
-  const rows = await db
+/** 读取本人历史及房间资料；有效期和对外投影交给 Service。 */
+export async function listHistory(userId: string) {
+  return db
     .select({ room: rooms, joined: roomHistory.lastJoinedAt, name: user.name })
     .from(roomHistory)
     .innerJoin(rooms, eq(rooms.id, roomHistory.roomId))
     .innerJoin(user, eq(user.id, rooms.ownerId))
-    .where(
-      and(
-        eq(roomHistory.userId, userId),
-        or(isNull(rooms.expiresAt), gt(rooms.expiresAt, new Date())),
-      ),
-    )
+    .where(eq(roomHistory.userId, userId))
     .orderBy(desc(roomHistory.lastJoinedAt), asc(rooms.id))
-  return rows.map((r) => ({ ...roomDto(r.room, r.name), lastJoinedAt: r.joined.toISOString() }))
 }
 /** 删除只撤销当前用户的访问凭证。 */
 export async function deleteHistory(userId: string, roomId: string) {
@@ -216,12 +179,6 @@ export async function deleteHistory(userId: string, roomId: string) {
       .delete(roomHistory)
       .where(and(eq(roomHistory.userId, userId), eq(roomHistory.roomId, roomId)))
   })
-}
-/** 历史详情复用有效凭证查询，不以活动成员或房主权限替代。 */
-export async function historyDetail(userId: string, roomId: string) {
-  const row = (await listHistory(userId)).find((r) => r.roomId === roomId)
-  if (!row) throw new BusinessError('ROOM_HISTORY_REQUIRED', '房间已到期或没有访问记录', 403)
-  return row
 }
 /** 查询当前用户的持久房间歌单。 */
 export async function getPlaylist(userId: string): Promise<RoomPlaylistItem[]> {
@@ -248,8 +205,6 @@ export async function editPlaylist(
         .orderBy(asc(roomPlaylistItems.position), asc(roomPlaylistItems.id))
     ).map((r) => ({ itemId: r.id, position: r.position, track: r.track }))
     const next = edit(old).map((item, position) => ({ ...item, position }))
-    if (next.length > 500)
-      throw new BusinessError('PLAYLIST_LIMIT_REACHED', '房间歌单最多 500 首', 409)
     await tx.delete(roomPlaylistItems).where(eq(roomPlaylistItems.userId, userId))
     if (next.length)
       await tx.insert(roomPlaylistItems).values(
@@ -318,13 +273,6 @@ export async function savePlayback(playback: Playback, activeIndex: number) {
 }
 /** 仅记录实际已经到达起播锚点的节目，版本唯一避免重复。 */
 export async function recordPlayed(playback: Playback) {
-  if (
-    !playback.track ||
-    !playback.activeMemberId ||
-    !playback.startedAt ||
-    playback.startedAt > Date.now()
-  )
-    return
   await db.transaction(async (tx) => {
     await tx
       .insert(roomPlayedSongs)
@@ -341,4 +289,83 @@ export async function recordPlayed(playback: Playback) {
       sql`delete from room_played_songs where room_id=${playback.roomId} and id in (select id from room_played_songs where room_id=${playback.roomId} order by played_at desc,id desc offset 500)`,
     )
   })
+}
+
+/** 启动时在同一事务重置在线投影和各房间的等待时间轴。 */
+export async function resetOnlineState(
+  emptyExpiresAt: Date,
+  resetPlayback: (saved: Playback) => Playback,
+) {
+  await db.transaction(async (tx) => {
+    await tx.update(roomMembers).set({ leftAt: new Date() }).where(isNull(roomMembers.leftAt))
+    await tx
+      .update(rooms)
+      .set({ memberCount: 0, emptyExpiresAt })
+      .where(and(eq(rooms.status, 'active'), sql`${rooms.memberCount} > 0`))
+    const states = await tx.select().from(roomPlaybackStates)
+    for (const state of states) {
+      await tx
+        .update(roomPlaybackStates)
+        .set({ activeIndex: -1, playback: resetPlayback(state.playback) })
+        .where(eq(roomPlaybackStates.roomId, state.roomId))
+    }
+  })
+}
+/** 按房间身份读取持久播放投影。 */
+export async function getPlayback(roomId: string) {
+  return (
+    await db.select().from(roomPlaybackStates).where(eq(roomPlaybackStates.roomId, roomId))
+  )[0]
+}
+/** 保存 Service 已校验的房间设置或在线摘要，返回数据库实际记录。 */
+export async function updateRoom(roomId: string, changes: Partial<Omit<RoomRow, 'id' | 'code'>>) {
+  return (await db.update(rooms).set(changes).where(eq(rooms.id, roomId)).returning())[0]
+}
+/** 退出投影与房间摘要在同一事务提交，房主及截止时间由 Service 决定。 */
+export async function recordLeave(
+  roomId: string,
+  userId: string,
+  leftAt: Date,
+  changes: Pick<RoomRow, 'memberCount' | 'ownerId' | 'lastActiveAt'> &
+    Partial<Pick<RoomRow, 'emptyExpiresAt'>>,
+) {
+  return db.transaction(async (tx) => {
+    await tx
+      .update(roomMembers)
+      .set({ leftAt })
+      .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)))
+    return (await tx.update(rooms).set(changes).where(eq(rooms.id, roomId)).returning())[0]
+  })
+}
+/** 归档房间、关闭成员投影与清空播放时间轴原子提交。 */
+export async function archiveRoom(
+  roomId: string,
+  endedAt: Date,
+  expiresAt: Date,
+  playback: Playback,
+) {
+  await db.transaction(async (tx) => {
+    await tx
+      .update(rooms)
+      .set({ status: 'ended', memberCount: 0, endedAt, expiresAt })
+      .where(eq(rooms.id, roomId))
+    await tx.update(roomMembers).set({ leftAt: endedAt }).where(eq(roomMembers.roomId, roomId))
+    await tx
+      .insert(roomPlaybackStates)
+      .values({ roomId, playback, activeIndex: -1 })
+      .onConflictDoUpdate({ target: roomPlaybackStates.roomId, set: { playback, activeIndex: -1 } })
+  })
+}
+/** 按 Service 提供的时刻筛选待处理空房，不自行决定有效期。 */
+export async function findEmptyRoomsBefore(deadline: Date) {
+  return db
+    .select()
+    .from(rooms)
+    .where(
+      and(eq(rooms.status, 'active'), eq(rooms.memberCount, 0), lt(rooms.emptyExpiresAt, deadline)),
+    )
+}
+/** 级联删除 Service 已确认到期的归档记录。 */
+export async function deleteArchivesBefore(deadline: Date) {
+  await db.delete(rooms).where(and(eq(rooms.status, 'ended'), lt(rooms.expiresAt, deadline)))
 }

@@ -18,9 +18,9 @@ async function waitForAudio(audio: HTMLAudioElement, signal: AbortSignal) {
       if (error) reject(error)
       else resolve()
     }
-    const ready = () => finish(),
-      failed = () => finish(new Error('音频加载失败')),
-      cancel = () => finish(new DOMException('已取消', 'AbortError'))
+    const ready = () => finish()
+    const failed = () => finish(new Error('音频加载失败'))
+    const cancel = () => finish(new DOMException('已取消', 'AbortError'))
     audio.addEventListener('canplay', ready, { once: true })
     audio.addEventListener('error', failed, { once: true })
     signal.addEventListener('abort', cancel, { once: true })

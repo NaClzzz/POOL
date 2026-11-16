@@ -1,5 +1,6 @@
+import { paginationSchema } from '@/server/http/validation'
 import { describe, expect, it } from 'vitest'
-import { neteasePlaylistId, paginationSchema, trackSchema } from '@/server/music/validation'
+import { neteasePlaylistId, trackSchema } from '@/server/music/validation'
 
 describe('音乐入口契约', () => {
   it.each([
