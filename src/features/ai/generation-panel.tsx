@@ -1,88 +1,45 @@
 'use client'
-
-import styles from '@/features/ai/generation-panel.module.css'
-import sharedStyles from '@/components/presentation.module.css'
-import { useEffect, useRef, useState } from 'react'
 import { Feather, LoaderCircle, RotateCcw, Square } from 'lucide-react'
-import { generateText } from '@/mocks/api'
 import { Button } from '@/components/ui/button'
-import type { Track } from '@/contracts/domain'
+import { useAiGeneration } from './use-ai-generation'
+import styles from './generation-panel.module.css'
+import shared from '@/components/presentation.module.css'
 
-/** 固定内容分段生成界面，真实 AI SDK 由独立生成服务接入。 */
-export function GenerationPanel({
-  initial = '',
-  onComplete,
-  tracks,
-}: {
-  initial?: string
-  onComplete?: () => void
-  tracks?: Track[]
-}) {
-  const [text, setText] = useState(initial)
-  const [status, setStatus] = useState<'idle' | 'working' | 'done' | 'error'>(
-    initial ? 'done' : 'idle',
-  )
-  const [error, setError] = useState('')
-  const controller = useRef<AbortController | null>(null)
-  useEffect(() => () => controller.current?.abort(), [])
-  /** 单次生成负责请求取消与状态转换，不把部分输出当成功。 */
-  const generate = async () => {
-    controller.current?.abort()
-    controller.current = new AbortController()
-    setStatus('working')
-    setError('')
-    setText('')
-    try {
-      await generateText(setText, controller.current.signal, tracks)
-      setStatus('done')
-      onComplete?.()
-    } catch (failure) {
-      setStatus('error')
-      setError(
-        failure instanceof DOMException && failure.name === 'AbortError'
-          ? '本次生成已取消，可以稍后重试。'
-          : (failure as Error).message,
-      )
-    }
-  }
+/** 喜欢列表上方的真实流式赏析，离页取消且不保存生成结果。 */
+export function GenerationPanel() {
+  const generation = useAiGeneration('/api/ai/liked-playlist-analysis')
   return (
-    <div className={styles.generationPanel}>
-      {text ? (
-        <div className={styles.generatedCopy}>
-          {text}
-          {status === 'working' && <span className={styles.textCursor} />}
-        </div>
-      ) : (
-        <div className={styles.generationEmpty}>
-          <p className={styles.emptyDescription}>尚未生成歌单分析</p>
-        </div>
-      )}
-      {error && (
-        <p role="alert" className={sharedStyles.inlineError}>
-          {error}
-        </p>
-      )}
-      <div className={styles.generationActions}>
-        {status === 'working' ? (
-          <>
-            <span className={styles.generationStatus}>
-              <LoaderCircle className="size-4 animate-spin" />
-              正在生成…
-            </span>
-            <Button variant="outline" size="sm" onClick={() => controller.current?.abort()}>
-              <Square />
-              取消
-            </Button>
-          </>
-        ) : status === 'done' ? (
-          <span className={styles.generationStatus}>已生成</span>
+    <section
+      className={styles.generationPanel}
+      aria-label="歌单分析"
+      aria-busy={generation.pending}
+    >
+      <div className={styles.generationHeading}>
+        <h2>歌单分析</h2>
+        {generation.pending ? (
+          <Button variant="ghost" size="sm" onClick={() => void generation.stop()}>
+            <Square />
+            取消
+          </Button>
         ) : (
-          <Button onClick={() => void generate()}>
-            {status === 'error' ? <RotateCcw /> : <Feather />}
-            {status === 'error' ? '重新生成' : '生成歌单分析'}
+          <Button variant="ghost" size="sm" onClick={generation.generate}>
+            {generation.text || generation.error ? <RotateCcw /> : <Feather />}
+            {generation.text || generation.error ? '重新生成' : '生成分析'}
           </Button>
         )}
       </div>
-    </div>
+      {generation.text && <div className={styles.generatedCopy}>{generation.text}</div>}
+      {generation.pending && (
+        <p className={styles.generationStatus} role="status">
+          <LoaderCircle className="size-4 animate-spin" />
+          正在生成…
+        </p>
+      )}
+      {generation.error && (
+        <p role="alert" className={shared.inlineError}>
+          {generation.error.message}
+        </p>
+      )}
+    </section>
   )
 }

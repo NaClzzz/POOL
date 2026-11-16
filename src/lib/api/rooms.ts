@@ -35,7 +35,7 @@ export const roomsApi = {
     return (await http.delete<ApiSuccess<null>>(`/room-history/${encodeURIComponent(roomId)}`)).data
       .data
   },
-  /** 历史详情只包含房间资料，AI 总结尚未接入。 */
+  /** 历史详情包含房间资料，共享总结由独立接口读取。 */
   async historyDetail(roomId: string, signal?: AbortSignal) {
     return (
       await http.get<ApiSuccess<RoomHistory>>(`/room-history/${encodeURIComponent(roomId)}`, {
@@ -86,6 +86,7 @@ export function useDeleteRoomHistory(options: MutationSuccessOptions<null, strin
     onMutate: () => useSession.getState().user?.id,
     onSuccess: async (data, roomId, userId) => {
       client.removeQueries({ queryKey: ['room-history-detail', userId, roomId] })
+      client.removeQueries({ queryKey: ['room-summary', userId, roomId] })
       await client.invalidateQueries({ queryKey: ['room-history', userId] })
       if (userId === useSession.getState().user?.id) await options.onSuccess?.(data, roomId)
     },

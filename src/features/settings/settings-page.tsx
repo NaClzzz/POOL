@@ -1,64 +1,27 @@
 'use client'
-import styles from '@/features/settings/settings-page.module.css'
-import sharedStyles from '@/components/presentation.module.css'
+import styles from './settings-page.module.css'
+import shared from '@/components/presentation.module.css'
 import { cn } from '@/lib/utils'
-import { useState } from 'react'
-import { Check, LogOut, RotateCcw, Volume2 } from 'lucide-react'
+import { LogOut, Volume2 } from 'lucide-react'
 import { useSession } from '@/stores/session'
 import { usePlayer } from '@/stores/player'
-import { getDatabase, resetDemo, setScenario } from '@/mocks/api'
-import type { DemoScenario } from '@/contracts/domain'
 import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/page-header'
 import { Slider } from '@/components/ui/slider'
 import { useLogout } from '@/features/auth/use-logout'
 import { AccountActions } from '@/features/auth/account-actions'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog'
 
-/** 本地偏好、可重复演示场景与账号退出，账号、房间和音乐均为真实服务，仅歌单分析保留演示。 */
+/** 真实账号与本地播放偏好，不再提供 AI 模拟场景。 */
 export function SettingsPage() {
   const user = useSession((s) => s.user!)
   const volume = usePlayer((s) => s.volume)
   const setVolume = usePlayer((s) => s.setVolume)
-  const [scenario, updateScenario] = useState<DemoScenario>(() => getDatabase().scenario)
-  const [notice, setNotice] = useState('')
-  const [resetOpen, setResetOpen] = useState(false)
   const { logout, pending, error: logoutError } = useLogout()
-  /** 切换后仅下一次 AI 演示读取新场景。 */
-  const selectScenario = (value: DemoScenario) => {
-    setScenario(value)
-    updateScenario(value)
-    setNotice('演示场景已切换')
-  }
-  /** 重置仅取消旧 AI 演示任务并恢复演示场景。 */
-  const reset = () => {
-    resetDemo()
-    updateScenario('normal')
-    setNotice('演示数据已重置，可以重新开始')
-    setResetOpen(false)
-  }
-  const scenarios: [DemoScenario, string, string][] = [
-    ['normal', '正常', '流畅地体验完整流程'],
-    ['slow', '慢加载', '查看加载及提交中的状态'],
-    ['offline', '服务不可用', '查看错误反馈与重试入口'],
-    ['limited', '请求受限', '查看频率限制反馈'],
-    ['ai-fail', 'AI 生成失败', '查看失败及手动重试状态'],
-  ]
   return (
     <div className={styles.settingsPage}>
       <PageHeader name="Settings" title="设置" />
       {logoutError && (
-        <p role="alert" className={sharedStyles.inlineError}>
+        <p role="alert" className={shared.inlineError}>
           {logoutError}
         </p>
       )}
@@ -67,9 +30,7 @@ export function SettingsPage() {
           <h2 className={styles.sectionTitle}>我的账号</h2>
         </div>
         <div className={styles.accountCard}>
-          <span className={cn(sharedStyles.avatar, sharedStyles.avatarLg)}>
-            {user.name.slice(0, 1)}
-          </span>
+          <span className={cn(shared.avatar, shared.avatarLg)}>{user.name.slice(0, 1)}</span>
           <div className="flex-1">
             <h3 className={styles.accountName}>{user.name}</h3>
             <p className={styles.accountEmail}>{user.email}</p>
@@ -99,66 +60,11 @@ export function SettingsPage() {
               max={1}
               step={0.01}
               value={[volume]}
-              onValueChange={(value) => setVolume((value as number[])[0])}
+              onValueChange={(value) => setVolume(Array.isArray(value) ? value[0] : value)}
             />
             <span className={styles.volumeValue}>{Math.round(volume * 100)}%</span>
           </div>
         </div>
-      </section>
-      <section className={styles.settingsSection}>
-        <div className={styles.settingsSectionHeading}>
-          <h2 className={styles.sectionTitle}>演示选项</h2>
-        </div>
-        <p className={styles.settingsDescription}>以下场景只影响 AI 歌单分析演示。</p>
-        <div className={styles.scenarioGrid}>
-          {scenarios.map(([value, title, text]) => (
-            <button
-              className={cn(
-                styles.scenarioOption,
-                value === scenario && styles.selected,
-                sharedStyles.action,
-              )}
-              key={value}
-              onClick={() => selectScenario(value)}
-            >
-              <span className={styles.scenarioHeading}>
-                {title}
-                {value === scenario && <Check size={15} />}
-              </span>
-              <small className={styles.scenarioDescription}>{text}</small>
-            </button>
-          ))}
-        </div>
-        <div className={styles.settingRow}>
-          <div>
-            <h3 className={styles.settingTitle}>重置演示数据</h3>
-            <p className={styles.settingDescription}>重置 AI 演示场景。</p>
-          </div>
-          <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
-            <AlertDialogTrigger render={<Button variant="outline" />}>
-              <RotateCcw />
-              重置演示数据
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>重置演示数据？</AlertDialogTitle>
-                <AlertDialogDescription>AI 演示场景将恢复默认值。</AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>取消</AlertDialogCancel>
-                <AlertDialogAction variant="destructive" onClick={reset}>
-                  确认重置
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
-        {notice && (
-          <p className={styles.settingsNotice} role="status">
-            <Check size={15} />
-            {notice}
-          </p>
-        )}
       </section>
     </div>
   )

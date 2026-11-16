@@ -2,4 +2,5 @@
 export * from './api/music'
 export * from './api/likes'
 export * from './api/rooms'
+export * from './api/ai'
 export type { MutationSuccessOptions } from './api/types'

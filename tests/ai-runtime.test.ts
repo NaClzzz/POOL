@@ -1,0 +1,41 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+const { evalQuota } = vi.hoisted(() => ({ evalQuota: vi.fn() }))
+vi.mock('@/server/redis', () => ({ getRedis: async () => ({ eval: evalQuota }) }))
+import { acquireAiTask, chargeAiQuota } from '@/server/ai/runtime'
+
+const releases: (() => void)[] = []
+afterEach(() => {
+  releases.splice(0).forEach((release) => release())
+  vi.clearAllMocks()
+})
+
+describe('AI 并发与故障边界', () => {
+  it('全站十个名额，重复任务拒绝，释放后可继续使用', () => {
+    for (let i = 0; i < 10; i++) releases.push(acquireAiTask(`playlist:${i}`))
+    expect(() => acquireAiTask('playlist:0')).toThrow('已有生成任务')
+    expect(() => acquireAiTask('summary:room')).toThrow('当前生成任务较多')
+    releases.pop()!()
+    releases.push(acquireAiTask('summary:room'))
+  })
+  it('两类额度和用户隔离，拒绝时返回等待秒数', async () => {
+    evalQuota.mockResolvedValue([1, 0])
+    await chargeAiQuota('a', 'playlist')
+    await chargeAiQuota('a', 'summary')
+    await chargeAiQuota('b', 'summary')
+    const keys = evalQuota.mock.calls.map(([, options]) => options.keys[0])
+    expect(new Set(keys).size).toBe(3)
+    evalQuota.mockResolvedValue([0, 45])
+    await expect(chargeAiQuota('a', 'summary')).rejects.toMatchObject({
+      code: 'RATE_LIMITED',
+      status: 429,
+      retryAfter: 45,
+    })
+  })
+  it('Redis 不可用时关闭高成本生成入口', async () => {
+    evalQuota.mockRejectedValue(new Error('redis failure'))
+    await expect(chargeAiQuota('a', 'summary')).rejects.toMatchObject({
+      code: 'LIMITER_UNAVAILABLE',
+      status: 503,
+    })
+  })
+})

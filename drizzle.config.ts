@@ -6,6 +6,7 @@ export default defineConfig({
     './src/server/db/schema.ts',
     './src/server/db/likes-schema.ts',
     './src/server/db/rooms-schema.ts',
+    './src/server/db/ai-schema.ts',
   ],
   out: './drizzle',
   dbCredentials: { url: process.env.DATABASE_URL! },

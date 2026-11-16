@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import styles from '@/features/likes/likes-page.module.css'
 import sharedStyles from '@/components/presentation.module.css'
 import { useState, type FormEvent } from 'react'
-import { Play, Download, Sparkles, Link2, CheckCircle2, LoaderCircle } from 'lucide-react'
+import { Play, Download, Link2, CheckCircle2, LoaderCircle } from 'lucide-react'
 import { useLikes, useImportLikes, useClearLikes } from '@/lib/api-client'
 import { usePlayer } from '@/stores/player'
 import { Button } from '@/components/ui/button'
@@ -16,7 +16,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,7 +37,6 @@ import { PageHeader } from '@/components/page-header'
 export function LikesPage() {
   const play = usePlayer((s) => s.play)
   const [importOpen, setImportOpen] = useState(false)
-  const [analysisOpen, setAnalysisOpen] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
   const [url, setUrl] = useState('')
   const query = useLikes()
@@ -139,20 +137,6 @@ export function LikesPage() {
               </form>
             </DialogContent>
           </Dialog>
-          <Sheet open={analysisOpen} onOpenChange={setAnalysisOpen}>
-            <SheetTrigger render={<Button variant="ghost" disabled={!query.data?.length} />}>
-              <Sparkles />
-              歌单分析
-            </SheetTrigger>
-            <SheetContent aria-describedby={undefined}>
-              <SheetHeader>
-                <SheetTitle>歌单分析</SheetTitle>
-              </SheetHeader>
-              <div className={sharedStyles.sheetBody}>
-                <GenerationPanel tracks={query.data} />
-              </div>
-            </SheetContent>
-          </Sheet>
         </div>
         <AlertDialog
           open={clearOpen}
@@ -204,7 +188,10 @@ export function LikesPage() {
       ) : query.isError ? (
         <ErrorState error={query.error} retry={() => void query.refetch()} />
       ) : query.data.length ? (
-        <TrackList tracks={query.data} />
+        <>
+          <GenerationPanel />
+          <TrackList tracks={query.data} />
+        </>
       ) : (
         <Empty title="暂无喜欢的歌曲" />
       )}

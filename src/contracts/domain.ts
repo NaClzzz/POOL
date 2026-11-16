@@ -15,12 +15,10 @@ export type Track = {
 
 /** 收藏时保存的歌曲快照与添加时间。 */
 export type LikedTrack = Track & { addedAt: string }
-/** 可复现的模拟接口场景。 */
-export type DemoScenario = 'normal' | 'slow' | 'offline' | 'limited' | 'ai-fail'
 /** 普通业务成功响应，Axios 接口方法据此取得准确的业务数据类型。 */
 export type ApiSuccess<T> = { ok: true; data: T; requestId: string }
 
-/** 普通业务接口与 mock 共用的统一结果形状。 */
+/** 普通业务接口共用的统一结果形状。 */
 export type ApiResult<T> =
   | ApiSuccess<T>
   | { ok: false; error: { code: string; message: string }; requestId: string }

@@ -5,7 +5,10 @@ import { BusinessError } from './errors'
 import { failure, success } from './response'
 
 /** HTTP 业务入口回调取得可信用户 ID，返回普通数据或媒体响应。 */
-type Action = (userId: string) => Promise<{ data: unknown; status?: number } | Response>
+type Action = (
+  userId: string,
+  requestId: string,
+) => Promise<{ data: unknown; status?: number } | Response>
 
 /** 会话、来源及错误映射集中于单个入口，具体参数由对应路由 schema 校验一次。 */
 export async function businessRequest(request: Request, action: Action) {
@@ -21,7 +24,7 @@ export async function businessRequest(request: Request, action: Action) {
       if (origin && origin !== new URL(readServerEnv().BETTER_AUTH_URL).origin)
         throw new BusinessError('FORBIDDEN', '请求来源不允许', 403)
     }
-    const result = await action(session.user.id)
+    const result = await action(session.user.id, requestId)
     return result instanceof Response ? result : success(result.data, requestId, result.status)
   } catch (error) {
     if (error instanceof z.ZodError || error instanceof SyntaxError)
