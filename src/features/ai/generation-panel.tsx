@@ -1,13 +1,13 @@
 'use client'
 import { Feather, LoaderCircle, RotateCcw, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useAiGeneration } from './use-ai-generation'
+import { usePlaylistAnalysisGeneration } from '@/lib/api-client'
 import styles from './generation-panel.module.css'
 import shared from '@/components/presentation.module.css'
 
-/** 喜欢列表上方的真实流式赏析，离页取消且不保存生成结果。 */
+/** 喜欢列表上方的流式赏析；离页取消请求，按账号恢复最近一次完整结果。 */
 export function GenerationPanel() {
-  const generation = useAiGeneration('/api/ai/liked-playlist-analysis')
+  const generation = usePlaylistAnalysisGeneration()
   return (
     <section
       className={styles.generationPanel}
@@ -16,6 +16,7 @@ export function GenerationPanel() {
     >
       <div className={styles.generationHeading}>
         <h2>歌单分析</h2>
+
         {generation.pending ? (
           <Button variant="ghost" size="sm" onClick={() => void generation.stop()}>
             <Square />
@@ -28,16 +29,16 @@ export function GenerationPanel() {
           </Button>
         )}
       </div>
+      {generation.error && (
+        <p role="alert" className={shared.inlineError}>
+          {generation.error.message}
+        </p>
+      )}
       {generation.text && <div className={styles.generatedCopy}>{generation.text}</div>}
       {generation.pending && (
         <p className={styles.generationStatus} role="status">
           <LoaderCircle className="size-4 animate-spin" />
           正在生成…
-        </p>
-      )}
-      {generation.error && (
-        <p role="alert" className={shared.inlineError}>
-          {generation.error.message}
         </p>
       )}
     </section>

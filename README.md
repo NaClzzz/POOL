@@ -55,7 +55,7 @@ Compose 固定官方镜像摘要。拉取受网络限制时通过 .env 的 POSTG
 
 ## 数据与替换边界
 
-浏览器请求分为 src/lib/http.ts（Axios 实例、/api 前缀和响应拦截器）与 src/lib/api-client.ts（原始业务接口及音乐／喜欢／大厅／历史 Query hooks），不再额外包装 get／post／delete。普通业务 JSON 和网易云上游调用均使用独立 Axios 实例；Better Auth 使用官方客户端，音频播放使用 Audio，媒体流代理保留原生 fetch。浏览器请求支持取消，网易云 JSON 上游维持 15 秒总期限。
+浏览器请求分为 src/lib/http.ts（Axios 实例、/api 前缀和响应拦截器）与 src/lib/api-client.ts（原始业务接口及音乐／喜欢／大厅／历史 Query hooks），不再额外包装 get／post／delete。普通业务 JSON 和网易云上游调用均使用独立 Axios 实例；Better Auth 使用官方客户端，AI 使用 useCompletion 消费 SDK 原生数据流，音频播放使用 Audio，媒体流代理保留原生 fetch。浏览器请求支持取消，网易云 JSON 上游维持 15 秒总期限。
 
 - src/server/auth/：认证核心、HTTP 入口、页面会话校验和 Redis 原子限流；核心供 Web 与 Socket 复用。
 - src/server/db/、drizzle/：认证 schema、连接池与版本化迁移，包含认证四张表、liked_songs、七张房间业务表及 room_summaries；没有内部歌曲 ID 或独立歌曲表。
@@ -68,7 +68,7 @@ Compose 固定官方镜像摘要。拉取受网络限制时通过 .env 的 POSTG
 - useRoomSession 持有页面作用域 Zustand 投影；useRoomAudio 控制实际音频加载、时间定位、取消与自动播放解锁。快照不进 Query 缓存、不做浏览器持久化。
 - src/features/、src/components/ui/：桌面交互及 shadcn/ui Base UI，业务样式使用 CSS Modules。
 
-账号与会话保存于 PostgreSQL；Redis 保存请求计数和可丢弃音乐资料缓存，不保存登录会话。浏览器不持久化密码或认证 token，旧 pool:prototype:v1:session 不参与认证。真实喜欢保存于 PostgreSQL，不将播放 URL 或歌词写入收藏；真实房间与历史保存于 PostgreSQL，在线、上台、投票及定时器在 Socket 进程内存，重启清空并等待重新上台。音量独立保存；不读取旧 pool:ai-demo:v1 或 pool:prototype:v1:data。歌单分析不入库，总结和生成状态保存于 PostgreSQL，并在房间结束满七天级联清理。
+账号与会话保存于 PostgreSQL；Redis 保存请求计数和可丢弃音乐资料缓存，不保存登录会话。浏览器不持久化密码或认证 token，旧 pool:prototype:v1:session 不参与认证。真实喜欢保存于 PostgreSQL，不将播放 URL 或歌词写入收藏；真实房间与历史保存于 PostgreSQL，在线、上台、投票及定时器在 Socket 进程内存，重启清空并等待重新上台。音量独立保存；不读取旧 pool:ai-demo:v1 或 pool:prototype:v1:data。歌单分析完整结果通过 Zustand persist 按账号保存在本地，离页取消请求，取消或失败不覆盖已有结果；总结和生成状态保存于 PostgreSQL，并在房间结束满七天级联清理。
 
 ## 迁移与验证
 

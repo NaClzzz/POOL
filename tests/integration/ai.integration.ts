@@ -346,9 +346,18 @@ describe('真实 AI SDK、账号、PostgreSQL 与 Redis', { concurrency: false }
     )
     const before = requests.length
     const shared = await generateSummaryHandler(req(b), context(id))
-    assert.match(shared.headers.get('Content-Type')!, /application\/json/)
-    assert.equal((await shared.json()).data.content, state.content)
+    assert.match(shared.headers.get('Content-Type')!, /text\/event-stream/)
+    const sharedStream = await shared.text()
+    assert.match(sharedStream, /"finishReason":"stop"/)
+    assert.ok(!sharedStream.includes('text-delta'))
+    assert.ok(!sharedStream.includes(state.content))
+    assert.equal(
+      (await (await getSummaryHandler(req(b, 'GET'), context(id))).json()).data.content,
+      state.content,
+    )
     assert.equal(requests.length, before)
+    const bQuota = `${namespace}:summary:${createHash('sha256').update(b.id).digest('hex')}:*`
+    assert.deepEqual(await (await getRedis()).keys(bQuota), [])
     await deleteHistory(a.id, id)
     assert.equal((await getSummaryHandler(req(a, 'GET'), context(id))).status, 403)
     assert.equal((await getSummaryHandler(req(b, 'GET'), context(id))).status, 200)
@@ -444,8 +453,16 @@ describe('真实 AI SDK、账号、PostgreSQL 与 Redis', { concurrency: false }
   })
   it('全站满额不认领房间也不扣用户额度', async () => {
     await clearQuota()
+    const completedRoom = await seedRoom()
+    const attempt = await claimRoomSummary(a.id, completedRoom)
+    await finishSummary(completedRoom, attempt.attemptId!, '已完成总结', null)
+    const before = requests.length
     const releases = Array.from({ length: 10 }, (_, i) => acquireAiTask(`fixture:${i}`))
     try {
+      const shared = await generateSummaryHandler(req(b), context(completedRoom))
+      assert.match(shared.headers.get('Content-Type')!, /text\/event-stream/)
+      assert.match(await shared.text(), /"finishReason":"stop"/)
+      assert.equal(requests.length, before)
       const id = await seedRoom()
       assert.equal((await generateSummaryHandler(req(a), context(id))).status, 503)
       assert.equal((await saved(id)).status, 'idle')

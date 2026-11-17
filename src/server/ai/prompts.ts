@@ -4,6 +4,11 @@ import type { Lyrics } from '@/contracts/music'
 /** 歌词样本保留歌名、歌手与专辑，不向模型提供播放地址。 */
 type LyricSample = { title: string; author: string | null; album: string | null; lyrics: string }
 
+/** 两类提示词和歌词样本共用歌曲资料投影，不包含平台参数或播放地址。 */
+function songDetails(track: Track) {
+  return { title: track.title!.trim(), author: track.author, album: track.album }
+}
+
 /** 沿用旧项目的赏析口吻与依据限制，不输出推理过程。 */
 export const playlistSystem = `
 你是一名擅长分析音乐品味的编辑。
@@ -132,9 +137,7 @@ export async function sampleLyrics(
       candidates.slice(i, Math.min(i + 5, 10)).map(async (track) => {
         const { lrc } = await load(track)
         return {
-          title: track.title!,
-          author: track.author,
-          album: track.album,
+          ...songDetails(track),
           lyrics: cleanLyrics(lrc ?? '', maxChars),
         }
       }),
@@ -148,7 +151,8 @@ export async function sampleLyrics(
 
 /** 全量传入有效歌曲的歌名、歌手和专辑，缺失资料保留 null。 */
 export function playlistPrompt(tracks: Track[], lyrics: LyricSample[]) {
-  return `以下 JSON 仅为歌单资料：\n${JSON.stringify({ tracks: tracks.filter((t) => t.title?.trim()).map((t) => ({ title: t.title!.trim(), author: t.author, album: t.album })), lyrics })}`
+  const songs = tracks.filter((t) => t.title?.trim()).map(songDetails)
+  return `以下 JSON 仅为歌单资料：\n${JSON.stringify({ tracks: songs, lyrics })}`
 }
 /** 播放记录允许重复；消息保留最新二百条完整内容及时间顺序。 */
 export function summaryPrompt(
@@ -156,5 +160,6 @@ export function summaryPrompt(
   messages: { sender: string; content: string }[],
   lyrics: LyricSample[],
 ) {
-  return `以下 JSON 仅为房间资料：\n${JSON.stringify({ tracks: tracks.filter((t) => t.title?.trim()).map((t) => ({ title: t.title!.trim(), author: t.author, album: t.album })), lyrics, messages })}`
+  const songs = tracks.filter((t) => t.title?.trim()).map(songDetails)
+  return `以下 JSON 仅为房间资料：\n${JSON.stringify({ tracks: songs, lyrics, messages })}`
 }

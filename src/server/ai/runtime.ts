@@ -48,7 +48,7 @@ export async function chargeAiQuota(userId: string, kind: 'playlist' | 'summary'
   if (!result[0])
     throw new BusinessError(
       'RATE_LIMITED',
-      '生成次数已达限制，请稍后重试',
+      '生成次数已达上限，请稍后再试',
       429,
       Math.max(1, result[1]),
     )
