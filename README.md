@@ -17,10 +17,10 @@ pnpm infra:up
 pnpm db:migrate
 ```
 
-网易云服务暂用源码启动。在 .env 配置 MUSIC_API_BASE_URL=http://127.0.0.1:3001 和 NETEASE_SOURCE_DIR，指向本机 api-enhanced 目录（当前 D:/Codes/Projects/Portfolio-Project/api-enhanced）。首次在源码目录安装依赖：
+网易云源码以普通文件纳入 vendor/api-enhanced，包与锁文件独立。配置 MUSIC_API_BASE_URL=http://127.0.0.1:3001，首次在 POOL 根目录安装音源依赖：
 
 ```sh
-pnpm install --frozen-lockfile --prod --ignore-scripts
+pnpm --dir vendor/api-enhanced install --frozen-lockfile --prod --ignore-scripts
 ```
 
 回到 POOL，在三个终端分别启动音源、Web、Socket；已运行的服务无需重复启动：
@@ -90,9 +90,12 @@ db:generate 用于 schema 变更后生成 SQL，首次运行只需执行已提�
 
 Vitest 覆盖请求层、身份边界、个人队列、AI 输入／限额／流协议／取消及期限以及真实 React 房间会话和媒体生命周期。集成测试连接 PostgreSQL／Redis，使用可控音乐上游和真实 Socket.IO 多客户端。房间和 AI 测试在随机隔离数据库 schema 执行已提交迁移，避免启动重置影响开发房间；认证／音乐测试使用随机账号和专用 Redis 命名空间。真实音源测试需 api-enhanced 已运行；AI 集成测试使用可控兼容模型接口，不需要真实模型密钥，不代表百炼实测。测试不启动 POOL Web，不替代多浏览器实际音乐同步与听感验收。
 
-生产 Web 构建与运行分别使用 pnpm build、pnpm start，Socket 使用 pnpm socket:start。生产构建前将 NEXT_PUBLIC_SOCKET_URL 留空，以同域 /socket.io/ 代理 Socket，保留轮询和 WebSocket 升级；该 NEXT_PUBLIC 变量在构建时注入。上线配置实际 HTTPS 的 BETTER_AUTH_URL；只有反向代理可信地覆盖 X-Forwarded-For 时才启用 AUTH_TRUST_PROXY=true。默认本地模式使用按端点共享的限流桶，忽略客户端伪造的代理 IP。
+生产使用独立 [compose.production.yaml](compose.production.yaml)，分别构建 Web standalone、编译后的 Socket、网易云 API 和一次性迁移工具；PostgreSQL／Redis 不公开端口。完整部署、环境变量、Nginx HTTPS／SSE／WebSocket 与备份恢复步骤见 [部署指南](docs/部署指南.md)。本地 pnpm build:server 生成独立 Socket 产物，pnpm socket:start 读取运行环境变量启动，不再使用 tsx；本地测试产物需自行传入环境变量（例如 node --env-file=.env --conditions=react-server dist/socket/dist/entries/socket.mjs）。
 
 ## 文档
+
+- [部署指南](docs/部署指南.md)
+- [第八阶段：源码集成与容器部署](docs/开发阶段/08-源码集成与容器部署.md)
 
 - [第七阶段：真实歌单分析与房间总结](docs/开发阶段/07-真实歌单分析与房间总结.md)
 

@@ -5,6 +5,13 @@ coverage/
 *.tsbuildinfo
 .env*
 !.env.example
+!.env.production.example
+!.env.prod.example
+dist/
+anonymous_token
+xeapi_public_key
+neapi_key
+*.log
 .DS_Store
 playwright-report/
 test-results/

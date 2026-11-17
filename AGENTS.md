@@ -6,6 +6,9 @@
 
 - [第七阶段：真实歌单分析与房间总结](docs/开发阶段/07-真实歌单分析与房间总结.md)：AI SDK、共享总结持久化、按用户额度与流式生命周期。
 
+- [部署指南](docs/部署指南.md)：生产镜像、Compose、Nginx、迁移与备份。
+- [第八阶段：源码集成与容器部署](docs/开发阶段/08-源码集成与容器部署.md)：仓库内音源及容器交付边界。
+
 - POOL 是独立新项目，`D:\Codes\Projects\POOL-LIVE` 仅供参考，不修改旧项目。
 - [项目概览](docs/项目概览.md)：总体选型、架构与已确认业务决策。
 - [服务端设计](docs/服务端设计.md)：数据库模型、DTO、响应结构、状态码、HTTP / Socket 契约与业务流程。
@@ -58,9 +61,11 @@
 - 个人播放跨页保留；房间页离开立即停音、退房并清理监听、请求、计时器和重连，退出后不自动恢复个人播放。
 - 真实历史在 PostgreSQL 每用户最多 50 条，新增与删除共用用户事务协调；空房 30 分钟结束、结束满 7 天拒绝访问并级联清理。启动补扫，运行每分钟扫描；重启清空在线、上台与投票，播放等待，原空房截止时间保留。
 - 房间、聊天、历史均已移除 mock，不迁移浏览器旧模拟资料。歌单分析与房间总结使用真实 Vercel AI SDK 请求链路，已删除全部业务 mock 和设置页演示选项。
-- PostgreSQL、Redis 使用 Docker Compose、固定镜像摘要与持久卷，端口绑定本机；Redis 仅做认证／音乐／AI 限流和可丢弃缓存，不存房间权威状态。
-- 网易云 API 从外部源码目录运行，只由 POOL 服务端调用；不转发 POOL Cookie。敏感配置只放未提交的 .env，不输出日志或文档。
+- 开发 compose.yaml 的 PostgreSQL／Redis 端口绑定本机；生产 compose.production.yaml 统一管理 Web、Socket、音源、数据库与 Redis，仅 Web／Socket 发布回环端口，数据库与 Redis 使用固定摘要及持久卷；Redis 仅做认证／音乐／AI 限流和可丢弃缓存，不存房间权威状态。
+- 网易云源码以普通文件保存在 vendor/api-enhanced，依赖与锁文件独立，不修改上游业务逻辑；本地 music:dev 使用该目录，生产使用上游 Dockerfile 独立构建且不发布端口，只由 POOL Web 服务调用；不转发 POOL Cookie。敏感配置只放未提交的 .env，不输出日志或文档。
 - 协议集成测试和媒体生命周期测试不替代多浏览器真实听感验收；AI fixture 测试不替代配置密钥后的百炼真实模型验收。
+
+- Web 生产使用 standalone；Socket 使用编译后的 JavaScript 与追踪运行依赖，不依赖 tsx。数据库迁移通过 tools profile 的 migrate 服务单独执行，不在应用启动时执行。生产配置见 .env.production.example，NEXT_PUBLIC_SOCKET_URL 是构建参数，其余业务密钥仅运行时注入。
 
 ## 文档维护与验证
 

@@ -1,6 +1,11 @@
+# 仅管理 POOL；vendor 音源拥有自己的 workspace 和依赖锁。
+packages:
+  - '.'
+
 minimumReleaseAgeExclude:
   - lucide-react@1.70.0
   - axios@1.21.1
 
+# 干净构建环境需显式允许 esbuild 安装平台二进制，不依赖本机全局批准记录。
 allowBuilds:
   esbuild: true

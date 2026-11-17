@@ -1,11 +1,13 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-// 源码依赖独立运行，不启动 POOL Web，也不自动安装或修改外部项目。
-const source = process.env.NETEASE_SOURCE_DIR
-if (!source || !existsSync(resolve(source, 'app.js')))
-  throw new Error('请在 .env 配置 NETEASE_SOURCE_DIR，指向 api-enhanced 源码目录')
+// 音源使用仓库内独立依赖，不启动 POOL Web，也不自动安装依赖。
+const source = fileURLToPath(new URL('../vendor/api-enhanced/', import.meta.url))
+if (!existsSync(new URL('../vendor/api-enhanced/node_modules/', import.meta.url)))
+  throw new Error(
+    '请先执行 pnpm --dir vendor/api-enhanced install --frozen-lockfile --prod --ignore-scripts',
+  )
 const address = new URL(process.env.MUSIC_API_BASE_URL || 'http://127.0.0.1:3001')
 // 独立音源进程不继承 POOL 数据库密码或认证密钥。
 const sourceEnv = { ...process.env }
@@ -15,6 +17,8 @@ for (const key of [
   'BETTER_AUTH_SECRET',
   'POSTGRES_PASSWORD',
   'REDIS_PASSWORD',
+  'ROOM_INTERNAL_SECRET',
+  'DASHSCOPE_API_KEY',
 ])
   delete sourceEnv[key]
 const child = spawn(process.execPath, ['app.js'], {

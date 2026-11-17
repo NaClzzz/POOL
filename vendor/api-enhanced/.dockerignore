@@ -1,0 +1,28 @@
+# Only upstream runtime source, static resources, license and independent lock files.
+/**
+!/module/
+!/plugins/
+!/public/
+!/util/
+!/data/
+!/app.js
+!/server.js
+!/package.json
+!/index.js
+!/generateConfig.js
+!/main.js
+!/pnpm-lock.yaml
+!/pnpm-workspace.yaml
+!/LICENSE
+
+# Never include local dependencies, credentials or runtime output under allowed folders.
+**/node_modules
+**/.git
+**/.env*
+**/.npmrc
+**/*.log
+**/*.pem
+**/*.key
+**/anonymous_token
+**/xeapi_public_key
+**/neapi_key

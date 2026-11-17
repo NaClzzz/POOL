@@ -1,0 +1,23 @@
+# POOL Web / Socket / migration 共用此上下文，音源使用 vendor 自己的上下文。
+**/.git
+**/node_modules
+**/.env*
+**/.npmrc
+**/*.log
+**/*.pem
+**/*.key
+**/anonymous_token
+**/xeapi_public_key
+**/neapi_key
+.next
+dist
+out
+coverage
+*.tsbuildinfo
+playwright-report
+test-results
+vendor
+docs
+.codex
+.vscode
+.idea
