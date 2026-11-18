@@ -40,7 +40,6 @@ FROM runtime AS web
 ENV HOSTNAME=0.0.0.0 PORT=3000 NEXT_TELEMETRY_DISABLED=1
 COPY --from=web-build --chown=node:node /app/.next/standalone ./
 COPY --from=web-build --chown=node:node /app/.next/static ./.next/static
-COPY --from=web-build --chown=node:node /app/public ./public
 EXPOSE 3000
 CMD ["node", "server.js"]
 

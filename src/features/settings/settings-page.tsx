@@ -11,7 +11,7 @@ import { Slider } from '@/components/ui/slider'
 import { useLogout } from '@/features/auth/use-logout'
 import { AccountActions } from '@/features/auth/account-actions'
 
-/** 真实账号与本地播放偏好，不再提供 AI 模拟场景。 */
+/** 管理当前账号资料与本地播放偏好。 */
 export function SettingsPage() {
   const user = useSession((s) => s.user!)
   const volume = usePlayer((s) => s.volume)

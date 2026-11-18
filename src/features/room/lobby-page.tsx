@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Empty, ErrorState, Loading } from '@/components/feedback'
 import { PageHeader } from '@/components/page-header'
-import { CreateRoomDialog } from './create-room-dialog'
+import { CreateRoomDialog } from './room-create-dialog'
 
 /** 房间大厅与创建入口，列表查询不维护实时房间快照。 */
 export function LobbyPage() {

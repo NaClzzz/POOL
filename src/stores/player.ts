@@ -1,6 +1,9 @@
 import { create } from 'zustand'
 import { trackKey, type Track } from '@/contracts/domain'
 
+/** 个人与房间播放器共用的本地音量存储键。 */
+export const PLAYER_VOLUME_KEY = 'pool:player:volume'
+
 /** 个人队列的播放顺序；随机模式先打乱队列，再依次循环。 */
 export type PlaybackMode = 'sequential' | 'shuffle'
 
@@ -47,7 +50,7 @@ type PlayerStore = {
   reset: () => void
 }
 
-/** 按可演示的本地资料生成个人播放行为，房间音频不存入此队列。 */
+/** 管理个人播放队列和控制意图，房间音频不存入此队列。 */
 export const usePlayer = create<PlayerStore>((set, get) => ({
   queue: [],
   baseQueue: [],
@@ -56,7 +59,7 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
   playing: false,
   volume: 0.6,
   position: 0,
-  duration: 24,
+  duration: 0,
   seekTo: null,
   roomActive: false,
   error: null,
@@ -123,8 +126,7 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
       error: null,
     })),
   setVolume: (volume) => {
-    if (typeof window !== 'undefined')
-      localStorage.setItem('pool:prototype:v1:volume', String(volume))
+    if (typeof window !== 'undefined') localStorage.setItem(PLAYER_VOLUME_KEY, String(volume))
     set({ volume })
   },
   seek: (seconds) => set({ seekTo: seconds, position: seconds }),

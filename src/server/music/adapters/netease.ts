@@ -53,7 +53,7 @@ function trackOf(song: z.infer<typeof songSchema>): Track {
   }
 }
 
-/** 平台身份只在适配器入口校验，避免把演示 ID 发给真实平台。 */
+/** 在适配器入口校验网易云条目 ID 的格式。 */
 function neteaseId(id: string) {
   if (!/^[1-9]\d{0,19}$/.test(id)) throw new BusinessError('INVALID_INPUT', '网易云条目 ID 无效')
   return id
@@ -100,7 +100,7 @@ async function upstream<T>(
   })
 }
 
-/** 网易云匿名适配器，全部能力通过统一契约提供，不启用跨源解锁。 */
+/** 网易云匿名适配器，全部能力通过统一契约提供。 */
 export const neteaseAdapter: MusicAdapter = {
   search: (q, offset, limit) =>
     musicCache(`netease:search:${encodeURIComponent(q)}:${offset}:${limit}`, 60, async () => {

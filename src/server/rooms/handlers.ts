@@ -44,7 +44,7 @@ export function listRoomHistoryHandler(request: Request) {
   })
 }
 
-/** 读取本人仍持有有效凭证的历史详情，不返回原始聊天或模拟总结。 */
+/** 读取本人仍持有有效凭证的历史详情，不返回原始聊天。 */
 export function getRoomHistoryHandler(request: Request, context: HistoryContext) {
   return businessRequest(request, async (userId) => ({
     data: await service.historyDetail(userId, (await context.params).roomId),

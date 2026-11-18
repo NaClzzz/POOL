@@ -8,7 +8,7 @@ const adapters: MusicAdapters = {
   netease: neteaseAdapter,
 }
 
-/** 未接通平台显式报未支持，不能回退到模拟条目或其他平台。 */
+/** 根据音源选择适配器，未接通的平台显式返回未支持。 */
 function adapterFor(source: MusicSource) {
   const adapter = adapters[source]
   if (!adapter) throw new BusinessError('CAPABILITY_NOT_SUPPORTED', '该音源暂未接入', 501)

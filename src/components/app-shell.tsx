@@ -59,8 +59,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             ))}
           </nav>
           <div className={styles.navAccount}>
-            <span className={styles.demoChip}>业务演示</span>
-            <span className={styles.navDivider} />
             <Link
               href="/settings"
               className={cn(sharedStyles.avatar, sharedStyles.avatarSm, sharedStyles.link)}

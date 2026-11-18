@@ -32,7 +32,11 @@ type QueueDrag = { key: string; baseline: string; tracks: Track[] }
 function QueueDetails({ track }: { track: Track }) {
   return (
     <>
-      <img className={styles.queueCover} src={track.cover_url || '/covers/water.svg'} alt="" />
+      {track.cover_url ? (
+        <img className={styles.queueCover} src={track.cover_url} alt="" />
+      ) : (
+        <span className={styles.queueCover} aria-hidden="true" />
+      )}
       <span className={styles.queueDetails}>
         <strong className={styles.queueTitle}>{track.title || '未知标题'}</strong>
         <small className={styles.queueAuthor}>{track.author || '未知作者'}</small>

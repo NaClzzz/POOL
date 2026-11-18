@@ -32,6 +32,9 @@
   height: 39px;
   width: 39px;
   border-radius: 5px;
+  background: var(--muted);
+  object-fit: cover;
+  flex-shrink: 0;
 }
 
 .queueItem.current {

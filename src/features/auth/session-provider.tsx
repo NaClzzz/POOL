@@ -21,11 +21,6 @@ export function AccountSessionProvider({ children }: { children: ReactNode }) {
   const name = user?.name ?? ''
 
   useEffect(() => {
-    // 旧版 sessionStorage 不能参与真实认证；仅移除该明确的原型键。
-    sessionStorage.removeItem('pool:prototype:v1:session')
-  }, [])
-
-  useEffect(() => {
     if (isPending) return
     if (previousId.current !== id || error) {
       void client.cancelQueries()

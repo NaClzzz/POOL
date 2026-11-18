@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useEffect, useState, type ReactNode } from 'react'
 import { AccountSessionProvider } from '@/features/auth/session-provider'
-import { usePlayer } from '@/stores/player'
+import { PLAYER_VOLUME_KEY, usePlayer } from '@/stores/player'
 import { PersonalAudio } from '@/features/player/audio'
 
 /** 应用级查询容器与个人音频生命周期，房间不在这里建立连接。 */
@@ -17,7 +17,7 @@ export function Providers({ children }: { children: ReactNode }) {
       }),
   )
   useEffect(() => {
-    const volume = localStorage.getItem('pool:prototype:v1:volume')
+    const volume = localStorage.getItem(PLAYER_VOLUME_KEY)
     if (volume) usePlayer.setState({ volume: Number(volume) })
   }, [])
   return (

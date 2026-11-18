@@ -7,7 +7,6 @@ export default function PageError({ reset }: { error: Error; reset: () => void }
   return (
     <div className={styles.emptyState}>
       <h2 className={styles.emptyTitle}>页面加载失败</h2>
-      <p className={styles.emptyDescription}>请重试；需要恢复演示数据时，可前往设置。</p>
       <Button onClick={reset}>重新加载</Button>
     </div>
   )

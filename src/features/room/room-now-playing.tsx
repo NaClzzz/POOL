@@ -9,7 +9,7 @@ import type { Playback } from '@/contracts/room'
 import styles from './room-page.module.css'
 import { cn } from '@/lib/utils'
 
-/** 读取真实 LRC，时间戳转换成毫秒；无歌词不生成演示内容。 */
+/** 读取 LRC 并将时间戳转换成毫秒。 */
 export function parseRoomLyrics(lrc: string | null | undefined) {
   return (lrc ?? '')
     .split('\n')

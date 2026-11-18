@@ -5,7 +5,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: { default: 'POOL', template: '%s · POOL' },
-  description: '音乐搜索、收藏与一起听的桌面端交互原型。',
+  description: '搜索与收藏音乐，在房间里一起听歌、聊天，生成歌单赏析与房间回顾。',
 }
 
 /** 根布局只提供样式、查询容器和个人音频的常驻边界。 */

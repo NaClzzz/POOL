@@ -41,8 +41,8 @@ export function PersonalPlayerDock() {
       <footer className={styles.playerDock}>
         <div className={styles.playerDockInner}>
           <div className={styles.dockTrack}>
-            {track ? (
-              <img src={track.cover_url!} alt="" className={styles.dockCover} />
+            {track?.cover_url ? (
+              <img src={track.cover_url} alt="" className={styles.dockCover} />
             ) : (
               <div className={cn(styles.dockCover, styles.emptyCover)}>
                 <Music2 />

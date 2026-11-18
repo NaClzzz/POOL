@@ -71,17 +71,6 @@
   align-items: center;
 }
 
-.demoChip {
-  color: var(--muted-foreground);
-  font-size: 11px;
-}
-
-.navDivider {
-  width: 1px;
-  height: 22px;
-  background: var(--muted);
-}
-
 .page {
   max-width: 1336px;
   margin: 0 auto;

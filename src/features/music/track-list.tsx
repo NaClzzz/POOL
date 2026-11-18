@@ -97,7 +97,11 @@ export function TrackList({
           disabled={disabled}
           onClick={() => (onAdd ? onAdd(track) : play(track, tracks))}
         >
-          <img className={styles.trackCover} src={track.cover_url || '/covers/water.svg'} alt="" />
+          {track.cover_url ? (
+            <img className={styles.trackCover} src={track.cover_url} alt="" />
+          ) : (
+            <span className={styles.trackCover} aria-hidden="true" />
+          )}
           <span className="min-w-0">
             <strong className={styles.trackTitle}>{track.title || '未知标题'}</strong>
             <small className={styles.trackAuthor}>
