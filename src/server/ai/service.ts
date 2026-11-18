@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import type { RoomSummaryDto } from '@/contracts/ai'
 import { BusinessError } from '../http/errors'
-import { likesService } from '../likes/service'
 import { musicService } from '../music/service'
 import { accessSummary, summaryInput, type SummaryAccess, type SummaryRow } from './repository'
-import { sampleLyrics, playlistPrompt, summaryPrompt } from './prompts'
+import { sampleLyrics, summaryPrompt } from './prompts'
 
 /** 资格最长保留两分钟，进程意外结束后可由查询或下次生成恢复。 */
 const ATTEMPT_MS = 120_000
@@ -53,45 +52,27 @@ export function getRoomSummary(userId: string, roomId: string) {
 
 /** 在数据库锁内认领一次尝试；已有成功结果直接返回且不会触发模型。 */
 export function claimRoomSummary(userId: string, roomId: string) {
-  return accessSummary<{ summary: RoomSummaryDto; attemptId: string | null }>(
-    userId,
-    roomId,
-    (access) => {
-      const expiry = assertSummaryAccess(access)
-      const row = recoverSummary(access.summary)
-      if (row?.status === 'succeeded')
-        return { value: { summary: summaryDto(roomId, expiry, row), attemptId: null } }
-      if (row?.status === 'generating')
-        throw new BusinessError('AI_IN_PROGRESS', '房间总结正在生成，请稍后查看', 409)
-      const attempt: SummaryRow = {
-        roomId,
-        status: 'generating',
-        attemptId: randomUUID(),
-        requestedBy: userId,
-        startedAt: new Date(),
-        content: null,
-        generatedAt: null,
-        errorCode: null,
-      }
-      return {
-        value: { summary: summaryDto(roomId, expiry, attempt), attemptId: attempt.attemptId },
-        write: attempt,
-      }
-    },
-  )
-}
-
-/** 从本人真实收藏读取输入，歌词调用统一音乐服务，不扣逐首用户查询额度。 */
-export async function preparePlaylist(userId: string, signal: AbortSignal) {
-  const tracks = (await likesService.list(userId, 0, 500)).items.filter((t) => t.title?.trim())
-  if (!tracks.length) throw new BusinessError('AI_INPUT_EMPTY', '喜欢列表没有可分析的歌曲', 400)
-  const lyrics = await sampleLyrics(
-    tracks,
-    (t) => musicService.getLyrics(t.source, t.source_id, t.extra),
-    signal,
-    1000,
-  )
-  return playlistPrompt(tracks, lyrics)
+  return accessSummary<string | null>(userId, roomId, (access) => {
+    assertSummaryAccess(access)
+    const row = recoverSummary(access.summary)
+    if (row?.status === 'succeeded') return { value: null }
+    if (row?.status === 'generating')
+      throw new BusinessError('AI_IN_PROGRESS', '房间总结正在生成，请稍后查看', 409)
+    const attempt: SummaryRow = {
+      roomId,
+      status: 'generating',
+      attemptId: randomUUID(),
+      requestedBy: userId,
+      startedAt: new Date(),
+      content: null,
+      generatedAt: null,
+      errorCode: null,
+    }
+    return {
+      value: attempt.attemptId,
+      write: attempt,
+    }
+  })
 }
 
 /** 最近播放与完整聊天只在服务端进入模型，歌词不按字符截取。 */

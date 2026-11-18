@@ -36,7 +36,6 @@ export function TrackList({
   const removeLike = useRemoveLike()
   const likedKeys = new Set(likes.data?.map(trackKey) ?? [])
   const mutationPending = addLike.isPending || removeLike.isPending
-  const mutationError = addLike.error || removeLike.error
   const compactVirtual = useVirtualizer({
     count: tracks.length,
     getScrollElement: () => parent.current,
@@ -54,7 +53,6 @@ export function TrackList({
     enabled: !compact && tracks.length > 50,
   })
   const virtual = compact ? compactVirtual : pageVirtual
-  const hasError = !!mutationError
   useLayoutEffect(() => {
     if (compact || tracks.length <= 50) return
     /** 列表起点随页头、错误反馈和视口变化重新测量，行定位扣除页面偏移。 */
@@ -68,7 +66,7 @@ export function TrackList({
       observer.disconnect()
       window.removeEventListener('resize', updateMargin)
     }
-  }, [compact, tracks.length, hasError])
+  }, [compact, tracks.length])
   /** 渲染单条歌曲；操作按钮不触发行级播放。 */
   const row = (track: Track, index: number) => {
     const active = current && trackKey(current) === trackKey(track)
@@ -166,9 +164,6 @@ export function TrackList({
         } as CSSProperties
       }
     >
-      {mutationError && (
-        <p className={cn(sharedStyles.inlineError, 'px-4')}>{mutationError.message}</p>
-      )}
       <div className={cn(styles.trackHeading, compact && styles.compact)}>
         <span>#</span>
         <span>歌曲 / 艺术家</span>

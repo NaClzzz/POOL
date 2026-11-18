@@ -213,6 +213,28 @@ describe('统一音乐服务、缓存与真实收藏事务', { concurrency: fals
     assert.equal((await response.json()).error.code, 'CAPABILITY_NOT_SUPPORTED')
   })
 
+  it('导入由适配器校验平台链接，未支持音源不按网易云解析且不写收藏', async () => {
+    const before = hits.length
+    const invalid = await importLikes(
+      req('/api/likes/import', {
+        source: 'netease',
+        url: 'https://evil.example/playlist?id=3778678',
+      }),
+    )
+    assert.equal(invalid.status, 400)
+    assert.equal((await invalid.json()).error.code, 'INVALID_PLAYLIST_LINK')
+    const unsupported = await importLikes(
+      req('/api/likes/import', {
+        source: 'bilibili',
+        url: 'https://www.bilibili.com/list/123',
+      }),
+    )
+    assert.equal(unsupported.status, 501)
+    assert.equal((await unsupported.json()).error.code, 'CAPABILITY_NOT_SUPPORTED')
+    assert.equal(hits.length, before)
+    assert.equal((await likesService.list(owner.id, 0, 500)).total, 0)
+  })
+
   it('搜索转换时长和封面，并合并并发未命中及命中缓存', async () => {
     const before = hits.filter((path) => path.startsWith('/cloudsearch')).length
     const replies = await Promise.all(

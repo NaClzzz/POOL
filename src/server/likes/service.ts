@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq } from 'drizzle-orm'
 import type { Track, LikedTrack, MusicSource } from '@/contracts/domain'
-import type { ImportLikesResult, Page } from '@/contracts/music'
+import type { ImportLikesResult, ImportPlaylistInput, Page } from '@/contracts/music'
 import { trackKey } from '@/contracts/domain'
 import { db } from '../db'
 import { user } from '../db/schema'
@@ -137,7 +137,11 @@ export const likesService = {
     return null
   },
 
-  async importPlaylist(userId: string, url: string): Promise<ImportLikesResult> {
+  /** 按选定音源分页读取歌单，复用收藏容量与导入租约。 */
+  async importPlaylist(
+    userId: string,
+    { source, url }: ImportPlaylistInput,
+  ): Promise<ImportLikesResult> {
     const redis = await getRedis().catch(() => {
       throw new BusinessError('LIMITER_UNAVAILABLE', '导入服务暂时不可用', 503)
     })
@@ -165,7 +169,7 @@ export const likesService = {
             504,
           )
         const limit = 100
-        const page = await musicService.getPlaylistTracks('netease', url, offset, limit)
+        const page = await musicService.getPlaylistTracks(source, url, offset, limit)
         const requested = Math.min(
           limit,
           Math.max(0, (page.tracks.total ?? offset + limit) - offset),

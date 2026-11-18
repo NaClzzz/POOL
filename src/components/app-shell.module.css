@@ -92,10 +92,3 @@
   padding: 18px 44px;
   overflow: clip;
 }
-
-.logoutError {
-  position: fixed;
-  top: calc(var(--navbar-height) + 10px);
-  right: 44px;
-  z-index: 45;
-}

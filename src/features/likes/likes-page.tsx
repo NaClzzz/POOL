@@ -1,11 +1,12 @@
 'use client'
 import { cn } from '@/lib/utils'
 
-import styles from '@/features/likes/likes-page.module.css'
 import sharedStyles from '@/components/presentation.module.css'
 import { useState, type FormEvent } from 'react'
-import { Play, Download, Link2, CheckCircle2, LoaderCircle } from 'lucide-react'
+import { Play, Download, Link2, LoaderCircle } from 'lucide-react'
 import { useLikes, useImportLikes, useClearLikes } from '@/lib/api-client'
+import { HttpError } from '@/lib/http'
+import type { MusicSource } from '@/contracts/domain'
 import { usePlayer } from '@/stores/player'
 import { Button } from '@/components/ui/button'
 import {
@@ -28,9 +29,15 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Empty, ErrorState, Loading } from '@/components/feedback'
 import { TrackList } from '@/features/music/track-list'
-import { GenerationPanel } from '@/features/ai/generation-panel'
 import { PageHeader } from '@/components/page-header'
 
 /** 用户喜欢页面，以完整查询统一驱动列表和容量展示。 */
@@ -39,13 +46,14 @@ export function LikesPage() {
   const [importOpen, setImportOpen] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
   const [url, setUrl] = useState('')
+  const [source, setSource] = useState<MusicSource>('netease')
   const query = useLikes()
   const importMutation = useImportLikes()
   const clearMutation = useClearLikes({ onSuccess: () => setClearOpen(false) })
-  /** 导入只提交链接，不从页面传递容量或目标用户。 */
+  /** 导入只提交选定音源和链接，不从页面传递容量或目标用户。 */
   const importPlaylist = (event: FormEvent) => {
     event.preventDefault()
-    importMutation.mutate(url)
+    importMutation.mutate({ source, url })
   }
   return (
     <>
@@ -74,6 +82,26 @@ export function LikesPage() {
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={importPlaylist}>
+                <div className={sharedStyles.field}>
+                  <label htmlFor="playlist-import-source">音源</label>
+                  <Select<MusicSource>
+                    value={source}
+                    onValueChange={(value) => value && setSource(value)}
+                    items={[{ value: 'netease', label: '网易云音乐' }]}
+                    disabled={importMutation.isPending}
+                  >
+                    <SelectTrigger
+                      id="playlist-import-source"
+                      className="w-full"
+                      aria-label="导入音源"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent alignItemWithTrigger={false}>
+                      <SelectItem value="netease">网易云音乐</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <label className={sharedStyles.field}>
                   歌单链接
                   <div className={sharedStyles.inputWithIcon}>
@@ -99,29 +127,10 @@ export function LikesPage() {
                 >
                   导入作者的歌单 ( ? )
                 </button>
-                {importMutation.error && (
-                  <p className={sharedStyles.inlineError}>{importMutation.error.message}</p>
-                )}
-                {importMutation.data && (
-                  <div className={styles.importResult}>
-                    <CheckCircle2 size={21} />
-                    <div>
-                      <strong>已新增 {importMutation.data.added} 首</strong>
-                      <p className={styles.importDetails}>
-                        重复 {importMutation.data.duplicates} 首 · 失败 {importMutation.data.failed}{' '}
-                        首 · 剩余容量 {importMutation.data.remainingCapacity} 首
-                        {importMutation.data.capacitySkipped !== null &&
-                          importMutation.data.capacitySkipped > 0 &&
-                          ` · 容量跳过 ${importMutation.data.capacitySkipped} 首`}
-                      </p>
-                      {importMutation.data.hasMore && (
-                        <p className={styles.importDetails}>
-                          歌单还有未读取曲目；已按剩余容量导入。
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
+                {importMutation.error instanceof HttpError &&
+                  ['INVALID_INPUT', 'INVALID_PLAYLIST_LINK'].includes(
+                    importMutation.error.code,
+                  ) && <p className={sharedStyles.inlineError}>{importMutation.error.message}</p>}
                 <Button
                   type="submit"
                   className="mt-5 w-full"
@@ -165,11 +174,6 @@ export function LikesPage() {
                 将清空全部 {query.data?.length ?? 0} 首喜欢，无法撤销。正在播放的队列会保留。
               </AlertDialogDescription>
             </AlertDialogHeader>
-            {clearMutation.error && (
-              <p role="alert" className={sharedStyles.inlineError}>
-                {clearMutation.error.message}
-              </p>
-            )}
             <AlertDialogFooter>
               <AlertDialogCancel disabled={clearMutation.isPending}>取消</AlertDialogCancel>
               <AlertDialogAction
@@ -188,10 +192,7 @@ export function LikesPage() {
       ) : query.isError ? (
         <ErrorState error={query.error} retry={() => void query.refetch()} />
       ) : query.data.length ? (
-        <>
-          <GenerationPanel />
-          <TrackList tracks={query.data} />
-        </>
+        <TrackList tracks={query.data} />
       ) : (
         <Empty title="暂无喜欢的歌曲" />
       )}

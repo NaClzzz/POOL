@@ -1,18 +1,3 @@
-.generationPanel {
-  padding: 18px 22px;
-  margin-bottom: 20px;
-  background: var(--card);
-  border-radius: 12px;
-}
-
-.generationHeading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-  font-size: 15px;
-}
-
 .generatedCopy {
   white-space: pre-wrap;
   line-height: var(--generated-copy-line-height, 2.4);

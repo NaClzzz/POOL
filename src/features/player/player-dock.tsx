@@ -25,6 +25,42 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import { Slider } from '@/components/ui/slider'
 import { SortableQueue } from '@/features/music/sortable-queue'
 
+/** 拖动时只预览进度，交互提交后才定位音频；切歌时由 key 清空草稿。 */
+function PlaybackProgress({
+  position,
+  duration,
+  disabled,
+  onSeek,
+}: {
+  position: number
+  duration: number | null
+  disabled: boolean
+  onSeek: (seconds: number) => void
+}) {
+  const [preview, setPreview] = useState<number | null>(null)
+  const displayedPosition = preview ?? position
+  return (
+    <div className={styles.progressRow}>
+      <span>{formatTime(displayedPosition * 1000)}</span>
+      <Slider
+        className={styles.progressSlider}
+        aria-label="个人播放进度"
+        min={0}
+        max={duration || 1}
+        step={0.1}
+        value={[Math.min(displayedPosition, duration ?? 0)]}
+        disabled={disabled}
+        onValueChange={(value) => setPreview(typeof value === 'number' ? value : value[0])}
+        onValueCommitted={(value) => {
+          onSeek(typeof value === 'number' ? value : value[0])
+          setPreview(null)
+        }}
+      />
+      <span>{formatTime(duration === null ? null : duration * 1000)}</span>
+    </div>
+  )
+}
+
 /** 全局个人播放器；房间加入后隐藏但保留暂停的个人队列。 */
 export function PersonalPlayerDock() {
   const state = usePlayer()
@@ -139,20 +175,13 @@ export function PersonalPlayerDock() {
                 <SkipForward className={styles.playIcon} />
               </Button>
             </div>
-            <div className={styles.progressRow}>
-              <span>{formatTime(state.position * 1000)}</span>
-              <Slider
-                className={styles.progressSlider}
-                aria-label="个人播放进度"
-                min={0}
-                max={state.duration || 1}
-                step={0.1}
-                value={[Math.min(state.position, state.duration)]}
-                disabled={!track || state.loading}
-                onValueChange={(value) => state.seek((value as number[])[0])}
-              />
-              <span>{formatTime(track ? state.duration * 1000 : null)}</span>
-            </div>
+            <PlaybackProgress
+              key={track ? `${trackKey(track)}:${state.loadVersion}` : 'empty'}
+              position={state.position}
+              duration={track ? state.duration : null}
+              disabled={!track || state.loading}
+              onSeek={state.seek}
+            />
           </div>
           <div className={styles.dockTools}>
             <Volume2 className={styles.volumeIcon} size={17} />

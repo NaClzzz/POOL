@@ -2,7 +2,7 @@ import { paginationSchema } from '@/server/http/validation'
 import { z } from 'zod'
 import { businessRequest } from '../http/business'
 import { likesService } from './service'
-import { sourceSchema, trackSchema, neteasePlaylistId } from '../music/validation'
+import { sourceSchema, trackSchema } from '../music/validation'
 import { musicLimit } from '../music/runtime'
 
 /** 收藏 HTTP 入口独立取可信身份，不接受请求提供的用户 ID。 */
@@ -25,15 +25,14 @@ export function likesRequest(request: Request) {
   })
 }
 
-/** 导入只读取正式网易云歌单引用；先校验、限流，再占用当前用户租约。 */
+/** 导入入口只校验公共参数；平台链接由统一音乐服务的适配器解析。 */
 export function importLikes(request: Request) {
   return businessRequest(request, async (userId) => {
     const input = z
-      .object({ source: z.literal('netease'), url: z.string().max(2048) })
+      .object({ source: sourceSchema, url: z.string().trim().min(1).max(2048) })
       .parse(await request.json())
-    neteasePlaylistId(input.url)
     await musicLimit(userId, 'import', 2, 300, true)
-    return { data: await likesService.importPlaylist(userId, input.url) }
+    return { data: await likesService.importPlaylist(userId, input) }
   })
 }
 

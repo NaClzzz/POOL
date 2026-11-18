@@ -23,10 +23,10 @@ export function musicKey(key: string) {
   return `${process.env.POOL_MUSIC_NAMESPACE || 'pool:music:v1'}:${key}`
 }
 
-/** 固定窗口内原子更新计数与 TTL，缓存命中同样扣用户额度。 */
+/** 限流 lua */
 const limitScript = `local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; return {n,redis.call('TTL',KEYS[1])}`
 
-/** 普通查询在 Redis 不可用时退至单实例计数；批量导入保持关闭。 */
+/** 限流 hook */
 export async function musicLimit(
   userId: string,
   scope: string,
@@ -57,7 +57,7 @@ export async function musicLimit(
     throw new BusinessError('RATE_LIMITED', '请求过于频繁，请稍后重试', 429, Math.max(1, ttl))
 }
 
-/** 只缓存成功结果，同一 key 的并发未命中共享一次上游查询。 */
+/** 缓存 hook */
 export async function musicCache<T>(
   key: string,
   seconds: number,

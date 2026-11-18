@@ -7,6 +7,8 @@ import type { LikedTrack, Track } from '@/contracts/domain'
 import type { ImportLikesResult } from '@/contracts/music'
 
 const { identity } = vi.hoisted(() => ({ identity: { user: null as AccountUser | null } }))
+const notifications = vi.hoisted(() => ({ notifySuccess: vi.fn(), notifyError: vi.fn() }))
+vi.mock('@/lib/notifications', () => notifications)
 vi.mock('@/stores/session', () => ({
   useSession: Object.assign(
     (select: (state: { user: AccountUser | null }) => unknown) => select(identity),
@@ -24,7 +26,10 @@ import {
   useClearLikes,
   useImportLikes,
   useMusicSearch,
+  roomsApi,
+  useDeleteRoomHistory,
 } from '@/lib/api-client'
+import { HttpError } from '@/lib/http'
 
 const track: Track = {
   source: 'netease',
@@ -60,6 +65,7 @@ function renderHook<T>(hook: () => T): T {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
   identity.user = { id: 'user-a', email: 'a@example.com', name: 'A' }
   client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 20000 }, mutations: { retry: false } },
@@ -123,6 +129,7 @@ describe('统一业务 Query hooks', () => {
     })
     await renderHook(() => useAddLike({ onSuccess: addSuccess })).mutateAsync(track)
     expect(addSuccess).toHaveBeenCalledOnce()
+    expect(notifications.notifySuccess).toHaveBeenCalledExactlyOnceWith('已加入喜欢')
     expect(client.getQueryState(['likes', 'user-b'])?.isInvalidated).toBe(false)
     client.setQueryData(['likes', 'user-a'], [liked])
     await renderHook(() => useRemoveLike()).mutateAsync(track)
@@ -130,7 +137,7 @@ describe('统一业务 Query hooks', () => {
     expect(client.getQueryState(['likes', 'user-a'])?.isInvalidated).toBe(true)
   })
 
-  it('清空回调等待公共缓存刷新后执行，导入通过变量提交原始链接', async () => {
+  it('清空回调等待公共缓存刷新后执行，导入通过变量提交音源及原始链接', async () => {
     client.setQueryData(['likes', 'user-a'], [liked])
     vi.spyOn(likesApi, 'clear').mockResolvedValue(null)
     vi.spyOn(likesApi, 'import').mockResolvedValue(imported)
@@ -141,11 +148,12 @@ describe('统一业务 Query hooks', () => {
     expect(likesApi.clear).toHaveBeenCalledWith()
     expect(closeDialog).toHaveBeenCalledOnce()
     const url = 'https://music.163.com/playlist?id=123'
+    const input = { source: 'netease' as const, url }
     const success = vi.fn()
-    const result = await renderHook(() => useImportLikes({ onSuccess: success })).mutateAsync(url)
+    const result = await renderHook(() => useImportLikes({ onSuccess: success })).mutateAsync(input)
     expect(result).toEqual(imported)
-    expect(likesApi.import).toHaveBeenCalledWith(url, expect.anything())
-    expect(success).toHaveBeenCalledWith(imported, url)
+    expect(likesApi.import).toHaveBeenCalledWith(input, expect.anything())
+    expect(success).toHaveBeenCalledWith(imported, input)
   })
 
   it('失败时保留错误，不执行成功回调或误刷新查询', async () => {
@@ -154,9 +162,13 @@ describe('统一业务 Query hooks', () => {
     vi.spyOn(likesApi, 'import').mockRejectedValue(error)
     const success = vi.fn()
     await expect(
-      renderHook(() => useImportLikes({ onSuccess: success })).mutateAsync('invalid'),
+      renderHook(() => useImportLikes({ onSuccess: success })).mutateAsync({
+        source: 'netease',
+        url: 'invalid',
+      }),
     ).rejects.toBe(error)
     expect(success).not.toHaveBeenCalled()
+    expect(notifications.notifyError).toHaveBeenCalledExactlyOnceWith(error)
     expect(client.getQueryState(['likes', 'user-a'])?.isInvalidated).toBe(false)
   })
 
@@ -179,6 +191,7 @@ describe('统一业务 Query hooks', () => {
     expect(client.getQueryState(['likes', 'user-a'])?.isInvalidated).toBe(true)
     expect(client.getQueryState(['likes', 'user-b'])?.isInvalidated).toBe(false)
     expect(success).not.toHaveBeenCalled()
+    expect(notifications.notifySuccess).not.toHaveBeenCalled()
   })
 
   it('空关键词和未登录禁用搜索，源和关键词构成不同查询键', () => {
@@ -211,5 +224,47 @@ describe('统一业务 Query hooks', () => {
     expect(search.mock.calls[0][4]).toBeInstanceOf(AbortSignal)
     expect(result.data?.pages).toHaveLength(2)
     expect(result.hasNextPage).toBe(false)
+  })
+  it.each(['INVALID_INPUT', 'INVALID_PLAYLIST_LINK'])(
+    '列表查询失败和导入 %s 校验交给对应区域，不弹通知',
+    async (code) => {
+      vi.spyOn(likesApi, 'list').mockRejectedValue(new Error('列表失败'))
+      await expect(renderHook(() => useLikes()).refetch({ throwOnError: true })).rejects.toThrow(
+        '列表失败',
+      )
+      const invalid = new HttpError(code, '请输入有效链接', 400, null)
+      vi.spyOn(likesApi, 'import').mockRejectedValue(invalid)
+      await expect(
+        renderHook(() => useImportLikes()).mutateAsync({ source: 'netease', url: 'bad' }),
+      ).rejects.toBe(invalid)
+      expect(notifications.notifyError).not.toHaveBeenCalled()
+    },
+  )
+  it('换号后旧操作失败不弹通知', async () => {
+    let fail!: (error: Error) => void
+    const remove = vi.spyOn(likesApi, 'remove').mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          fail = reject
+        }),
+    )
+    const pending = renderHook(() => useRemoveLike()).mutateAsync(track)
+    const settled = expect(pending).rejects.toThrow('旧操作失败')
+    await vi.waitFor(() => expect(remove).toHaveBeenCalledOnce())
+    identity.user = { id: 'user-b', email: 'b@example.com', name: 'B' }
+    fail(new Error('旧操作失败'))
+    await settled
+    expect(notifications.notifyError).not.toHaveBeenCalled()
+  })
+  it('删除历史清除本人详情与总结缓存，通知一次后执行页面回调', async () => {
+    client.setQueryData(['room-history-detail', 'user-a', 'room'], {})
+    client.setQueryData(['room-summary', 'user-a', 'room'], {})
+    vi.spyOn(roomsApi, 'deleteHistory').mockResolvedValue(null)
+    const success = vi.fn()
+    await renderHook(() => useDeleteRoomHistory({ onSuccess: success })).mutateAsync('room')
+    expect(client.getQueryData(['room-summary', 'user-a', 'room'])).toBeUndefined()
+    expect(client.getQueryData(['room-history-detail', 'user-a', 'room'])).toBeUndefined()
+    expect(notifications.notifySuccess).toHaveBeenCalledExactlyOnceWith('已删除这条房间历史')
+    expect(success).toHaveBeenCalledExactlyOnceWith(null, 'room')
   })
 })

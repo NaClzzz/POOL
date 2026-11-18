@@ -16,7 +16,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const isRoomPage = /^\/rooms\/(?!history(?:\/|$))[^/]+$/.test(pathname)
   const router = useRouter()
-  const { logout, pending, error } = useLogout()
+  const { logout, pending } = useLogout()
   const user = useSession((s) => s.user)
   const ready = useSession((s) => s.ready)
   useEffect(() => {
@@ -78,11 +78,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </header>
       <main className={cn(styles.page, isRoomPage && styles.roomRoute)}>{children}</main>
-      {error && (
-        <p role="alert" className={cn(sharedStyles.inlineError, styles.logoutError)}>
-          {error}
-        </p>
-      )}
       <PersonalPlayerDock />
     </div>
   )

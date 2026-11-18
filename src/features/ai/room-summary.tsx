@@ -3,8 +3,7 @@ import { Feather, LoaderCircle, RotateCcw } from 'lucide-react'
 import { useRoomSummary, useRoomSummaryGeneration } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { ErrorState, Loading } from '@/components/feedback'
-import styles from './generation-panel.module.css'
-import shared from '@/components/presentation.module.css'
+import styles from './room-summary.module.css'
 
 /** 共享总结按持久状态确认成功；离页只关闭接收，不停止服务端任务。 */
 export function RoomSummary({ roomId }: { roomId: string }) {
@@ -16,10 +15,6 @@ export function RoomSummary({ roomId }: { roomId: string }) {
   const working = generation.pending || query.data.status === 'generating'
   const content = saved ? query.data.content : generation.text
   const retry = query.data.status === 'failed' || !!generation.error
-  const error = saved
-    ? null
-    : generation.error?.message ||
-      (query.data.status === 'failed' ? '上次总结未完成，可以手动重试。' : null)
   return (
     <section aria-label="房间总结" aria-busy={working}>
       {content && <div className={styles.generatedCopy}>{content}</div>}
@@ -34,11 +29,6 @@ export function RoomSummary({ roomId }: { roomId: string }) {
           {retry ? <RotateCcw /> : <Feather />}
           {retry ? '重试生成' : '生成房间总结'}
         </Button>
-      )}
-      {error && (
-        <p role="alert" className={shared.inlineError}>
-          {error}
-        </p>
       )}
     </section>
   )

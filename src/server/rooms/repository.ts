@@ -69,7 +69,7 @@ export type RoomListPolicy = {
   emptyExpiresAfter: Date
   publicOnly: boolean
 }
-/** 先在数据库按策略筛选再分页，避免 Service 过滤后遗漏下一页。 */
+/** 大厅按房间名、标签或完整房间号查询，在数据库按策略筛选后分页。 */
 export async function listRooms(
   userId: string,
   q: string,

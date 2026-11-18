@@ -13,6 +13,12 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   replace: vi.fn(),
   push: vi.fn(),
+  notifySuccess: vi.fn(),
+  notifyError: vi.fn(),
+}))
+vi.mock('@/lib/notifications', () => ({
+  notifySuccess: mocks.notifySuccess,
+  notifyError: mocks.notifyError,
 }))
 vi.mock('@/lib/socket-client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/socket-client')>()),
@@ -251,7 +257,9 @@ describe('房间会话生命周期', () => {
     await act(async () => current.command('room:playlist:clear', {}))
     expect(current.snapshot?.revision).toBe(100)
     expect(current.clockOffset).toBe(originalOffset)
-    expect(current.commandError).toBe('确认超时')
+    expect(mocks.notifyError).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ message: '确认超时' }),
+    )
     expect(invalidate).not.toHaveBeenCalled()
     expect(mocks.send.mock.calls.filter((call) => call[1] === 'room:playlist:clear')).toHaveLength(
       1,
@@ -269,7 +277,14 @@ describe('房间会话生命周期', () => {
         if (kind === 'join') await current.join('')
         else await current.command('room:chat:send', { content: 'hello' })
       })
-      expect(kind === 'join' ? current.error?.message : current.commandError).toBe('确认超时')
+      if (kind === 'join') {
+        expect(current.error?.message).toBe('确认超时')
+        expect(mocks.notifyError).not.toHaveBeenCalled()
+      } else {
+        expect(mocks.notifyError).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({ message: '确认超时' }),
+        )
+      }
       expect(mocks.send.mock.calls.map((call) => call[1])).toEqual([
         kind === 'join' ? 'room:join' : 'room:chat:send',
         'room:sync',
@@ -307,6 +322,7 @@ describe('房间会话生命周期', () => {
     await act(async () => socket.disconnect())
     expect(current.snapshot).toEqual(snapshot)
     expect(current.connection).toBe('reconnecting')
+    expect(mocks.notifyError).not.toHaveBeenCalled()
     expect(mocks.setRoom).toHaveBeenLastCalledWith(false)
     await act(async () => socket.connect())
     expect(mocks.send.mock.calls.filter((call) => call[1] === 'room:join')).toHaveLength(2)
@@ -360,7 +376,9 @@ describe('房间会话生命周期', () => {
     })
     expect(mocks.send.mock.calls.filter((call) => call[1] === 'room:chat:send')).toHaveLength(1)
     expect(mocks.send.mock.calls.filter((call) => call[1] === 'room:sync')).toHaveLength(1)
-    expect(current.commandError).toBe('确认超时')
+    expect(mocks.notifyError).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ message: '确认超时' }),
+    )
   })
   it('加入尚未完成就离页时忽略晚到结果，不重开播放器', async () => {
     let resolve!: (value: unknown) => void
@@ -389,10 +407,74 @@ describe('房间会话生命周期', () => {
       sockets[1].fire('room:forced-leave', { roomCode: 'other', reason: 'kicked' }),
     )
     expect(mocks.replace).not.toHaveBeenCalled()
+    expect(mocks.notifyError).not.toHaveBeenCalled()
     await act(async () =>
       sockets[1].fire('room:forced-leave', { roomCode: 'code', reason: 'kicked' }),
     )
     expect(mocks.replace).toHaveBeenCalledWith('/rooms')
     expect(current.snapshot).toBe(null)
+    expect(mocks.notifyError).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ message: '你已被移出房间' }),
+    )
+  })
+  it('命令结果通知一次，聊天和同步成功保持静默，导入保留统计', async () => {
+    await mount()
+    await act(async () => current.command('room:playlist:clear', {}))
+    expect(mocks.notifySuccess).toHaveBeenCalledExactlyOnceWith('房间歌单已清空')
+    mocks.notifySuccess.mockClear()
+    await act(async () => current.command('room:chat:send', { content: 'hello' }))
+    await act(async () => current.command('room:sync', {}))
+    expect(mocks.notifySuccess).not.toHaveBeenCalled()
+    mocks.send.mockResolvedValueOnce({
+      imported: { added: 2, duplicates: 3, failed: 4, capacitySkipped: 5 },
+    })
+    await act(async () => current.command('room:playlist:import-liked', {}))
+    expect(mocks.notifySuccess).toHaveBeenCalledExactlyOnceWith(
+      '已加入 2 首歌曲',
+      '重复 3 首 · 不支持或无时长 4 首 · 容量不足 5 首',
+    )
+  })
+  it('换号后旧命令失败不弹通知，断线错误保留连接状态', async () => {
+    await mount()
+    let fail!: (error: Error) => void
+    mocks.send.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          fail = reject
+        }),
+    )
+    const pending = current.command('room:playlist:clear', {})
+    mocks.userId = 'b'
+    await mount()
+    await act(async () => {
+      fail(new RoomCommandError('FORBIDDEN', '旧操作失败'))
+      await pending
+    })
+    expect(mocks.notifyError).not.toHaveBeenCalled()
+    mocks.send.mockRejectedValueOnce(new RoomCommandError('NOT_CONNECTED', '连接已断开'))
+    await act(async () => current.command('room:playlist:clear', {}))
+    expect(mocks.notifyError).not.toHaveBeenCalled()
+  })
+  it('房间设置的服务端校验错误交回表单，不重复弹通知', async () => {
+    await mount()
+    const invalid = new RoomCommandError('ROOM_CAPACITY_CONFLICT', '人数上限不能小于当前人数')
+    mocks.send.mockRejectedValueOnce(invalid)
+    const showFieldError = vi.fn()
+    await act(async () =>
+      current.command(
+        'room:update-settings',
+        {
+          name: '房间',
+          tag: '标签',
+          maxMembers: 2,
+          maxStageMembers: 1,
+          passwordAction: 'keep',
+        },
+        showFieldError,
+      ),
+    )
+    expect(showFieldError).toHaveBeenCalledExactlyOnceWith(invalid)
+    expect(mocks.notifyError).not.toHaveBeenCalled()
+    expect(mocks.notifySuccess).not.toHaveBeenCalled()
   })
 })

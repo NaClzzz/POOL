@@ -263,12 +263,14 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
     assert.equal('passwordHash' in created, false)
     const rejected = await responses.find((response) => response.status === 409)!.json()
     assert.equal(rejected.error.code, 'ROOM_ALREADY_CREATED')
-    const hidden = await listRoute(
-      new Request(`${base}/api/rooms?q=${encodeURIComponent(created.name)}`, {
-        headers: { cookie: users[0].cookie },
-      }),
-    )
-    assert.deepEqual((await hidden.json()).data.rooms.items, [])
+    for (const q of [created.name, created.tag]) {
+      const hidden = await listRoute(
+        new Request(`${base}/api/rooms?q=${encodeURIComponent(q)}`, {
+          headers: { cookie: users[0].cookie },
+        }),
+      )
+      assert.deepEqual((await hidden.json()).data.rooms.items, [])
+    }
     const exact = await listRoute(
       new Request(`${base}/api/rooms?q=${created.roomCode}`, {
         headers: { cookie: users[0].cookie },
@@ -285,6 +287,23 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
     assert.equal(invalid.status, 400)
     const owner = await connect(users[2].cookie)
     await snapshot(owner, 'room:join', { roomCode: created.roomCode, password: 'secret-room' })
+    assert.equal((await command(owner, 'room:dissolve', {})).ok, true)
+  })
+  it('大厅按房间名、标签或完整房间号搜索，并保留卡片标签', async () => {
+    const room = await create(users[0])
+    for (const q of [room.name, room.tag, room.roomCode]) {
+      const response = await listRoute(
+        new Request(`${base}/api/rooms?q=${encodeURIComponent(q)}`, {
+          headers: { cookie: users[1].cookie },
+        }),
+      )
+      assert.equal(response.status, 200)
+      const { items } = (await response.json()).data.rooms
+      assert.equal(items[0].roomId, room.roomId)
+      assert.equal(items[0].tag, room.tag)
+    }
+    const owner = await connect(users[0].cookie)
+    await snapshot(owner, 'room:join', { roomCode: room.roomCode })
     assert.equal((await command(owner, 'room:dissolve', {})).ok, true)
   })
   it('真实创建、密码与容量，失败加入不写历史，同房多连接只计一人', async () => {

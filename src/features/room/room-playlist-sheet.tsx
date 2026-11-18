@@ -27,19 +27,12 @@ import styles from './room-playlist-sheet.module.css'
 type RoomPlaylistSheetProps = {
   snapshot: RoomSnapshot
   open: boolean
-  error: string
   connected: boolean
   command: RoomCommand
 }
 
 /** 左列搜索加歌、右列管理歌单；两个内容区域独立滚动。 */
-export function RoomPlaylistSheet({
-  snapshot,
-  open,
-  error,
-  connected,
-  command,
-}: RoomPlaylistSheetProps) {
+export function RoomPlaylistSheet({ snapshot, open, connected, command }: RoomPlaylistSheetProps) {
   const [search, setSearch] = useState('')
   const [keyword, setKeyword] = useState('')
   const [source, setSource] = useState<MusicSource>('netease')
@@ -52,7 +45,6 @@ export function RoomPlaylistSheet({
       <SheetHeader>
         <SheetTitle>我的房间歌单</SheetTitle>
       </SheetHeader>
-      {error && <p className={cn(sharedStyles.inlineError, styles.error)}>{error}</p>}
       <div className={styles.columns}>
         <section className={styles.column} aria-label="房间内搜歌">
           <div className={styles.columnHeader}>

@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { createRoomSocket, sendRoomCommand, RoomCommandError } from '@/lib/socket-client'
 import { useSession } from '@/stores/session'
 import { usePlayer } from '@/stores/player'
+import { notifyError, notifySuccess } from '@/lib/notifications'
 import type { RoomCommands, RoomSnapshot, ServerRoomEvents } from '@/contracts/room'
 
 /** 页面作用域实时状态，不持久化且不进入 Query 缓存。 */
@@ -15,6 +16,21 @@ type SessionState = {
   connection: 'joining' | 'joined' | 'reconnecting'
   error: Error | null
   clockOffset: number
+}
+
+/** 有独立操作结果的命令文案；聊天、同步和自动媒体报告不弹成功通知。 */
+const commandSuccess: Partial<Record<keyof RoomCommands, string>> = {
+  'room:stage:join': '已上台',
+  'room:stage:leave': '上台成员已更新',
+  'room:playlist:add': '已加入房间歌单',
+  'room:playlist:remove': '已移除歌曲',
+  'room:playlist:reorder': '歌单顺序已更新',
+  'room:playlist:shuffle': '歌单已打乱',
+  'room:playlist:clear': '房间歌单已清空',
+  'room:playback:skip': '已切歌',
+  'room:playback:vote-skip': '已投票切歌',
+  'room:update-settings': '房间设置已保存',
+  'room:kick-member': '已移出成员',
 }
 
 /** 房间连接生命周期、广播投影和命令错误集中于单个 hook。 */
@@ -35,8 +51,6 @@ export function useRoomSession(code: string) {
   const router = useRouter()
   const client = useQueryClient()
   const userId = useSession((s) => s.user?.id)
-  const [commandError, setCommandError] = useState('')
-  const [notice, setNotice] = useState('')
 
   /** 统一检查完整快照的房间、播放版本和修订号；重新加入允许接收重建状态。 */
   const applySnapshot = useCallback(
@@ -169,6 +183,12 @@ export function useRoomSession(code: string) {
       store.setState({ snapshot: null })
       usePlayer.getState().setRoom(false)
       void client.invalidateQueries({ queryKey: ['room-history', userId] })
+      if (payload.reason === 'dissolved') notifySuccess('房间已结束')
+      else if (payload.reason === 'switched') notifySuccess('已切换到其他房间')
+      else
+        notifyError(
+          new Error(payload.reason === 'kicked' ? '你已被移出房间' : '登录已失效，请重新登录'),
+        )
       router.replace('/rooms')
     }
 
@@ -200,6 +220,7 @@ export function useRoomSession(code: string) {
     async <K extends keyof RoomCommands>(
       eventName: K,
       payload: RoomCommands[K],
+      onValidationError?: (error: Error) => void,
     ): Promise<boolean> => {
       const socket = socketRef.current
       if (!socket) return false
@@ -207,15 +228,28 @@ export function useRoomSession(code: string) {
         const result = await sendRoomCommand(socket, eventName, payload)
         if (socketRef.current !== socket) return false
         if (result.snapshot) applySnapshot(result.snapshot)
-        setCommandError('')
         if (result.imported)
-          setNotice(
-            `已加入 ${result.imported.added} 首，重复 ${result.imported.duplicates} 首，不支持或无时长 ${result.imported.failed} 首，容量不足 ${result.imported.capacitySkipped} 首`,
+          notifySuccess(
+            `已加入 ${result.imported.added} 首歌曲`,
+            `重复 ${result.imported.duplicates} 首 · 不支持或无时长 ${result.imported.failed} 首 · 容量不足 ${result.imported.capacitySkipped} 首`,
           )
+        else if (commandSuccess[eventName]) notifySuccess(commandSuccess[eventName])
         return true
       } catch (error) {
         if (socketRef.current !== socket) return false
-        setCommandError((error as Error).message)
+        if (
+          onValidationError &&
+          error instanceof RoomCommandError &&
+          (error.code === 'INVALID_INPUT' || error.code === 'ROOM_CAPACITY_CONFLICT')
+        ) {
+          onValidationError(error)
+          return false
+        }
+        if (
+          eventName !== 'room:playback:media-error' &&
+          !(error instanceof RoomCommandError && error.code === 'NOT_CONNECTED')
+        )
+          notifyError(error as Error)
         if (error instanceof RoomCommandError && error.code === 'ACK_TIMEOUT' && socket.connected) {
           void syncRoom(socket)
         }
@@ -224,5 +258,5 @@ export function useRoomSession(code: string) {
     },
     [applySnapshot, syncRoom],
   )
-  return { ...state, commandError, notice, command, join, leave: () => router.push('/rooms') }
+  return { ...state, command, join, leave: () => router.push('/rooms') }
 }

@@ -60,8 +60,8 @@ export function RoomHeader({
       return
     }
     setPending(true)
-    if (await command('room:update-settings', settings)) setOpen(false)
-    else setError('保存失败，请检查设置后重试')
+    if (await command('room:update-settings', settings, (failure) => setError(failure.message)))
+      setOpen(false)
     setPending(false)
   }
   return (

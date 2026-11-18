@@ -10,65 +10,37 @@ import { businessRequest } from '../http/business'
 import { BusinessError } from '../http/errors'
 import { createBailianModel, aiError } from './provider'
 import { acquireAiTask, chargeAiQuota } from './runtime'
-import { playlistSystem, summarySystem } from './prompts'
-import { getRoomSummary, claimRoomSummary, preparePlaylist, prepareSummary } from './service'
+import { summarySystem } from './prompts'
+import { getRoomSummary, claimRoomSummary, prepareSummary } from './service'
 import { finishSummary } from './repository'
 
 /** 只接受 URL 归档身份，客户端消息不作为生成资料。 */
 type SummaryContext = { params: Promise<{ roomId: string }> }
-/** 共用模型与流响应参数；房间入口额外提供保存和失败回写。 */
-type GenerationOptions = {
+/** 已认领房间总结的生成资料，尝试标识用于隔离保存与失败回写。 */
+type SummaryGeneration = {
   model: ReturnType<typeof createBailianModel>
   prompt: string
-  system: string
-  maxOutputTokens: number
-  signal: AbortSignal
+  roomId: string
+  attemptId: string
   requestId: string
   release: () => void
-  save?: (text: string) => Promise<void>
-  fail?: (code: string) => Promise<unknown>
 }
 const roomIdSchema = z.string().min(1).max(128)
 /** 所有生成响应禁止缓存与代理缓冲，请求编号由入口补充。 */
 const streamHeaders = { 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' }
 
-/** 准备过程有独立期限，取消后不启动模型；已发出的音乐查询由原有期限收尾。 */
-async function prepareWithin(signal: AbortSignal, prepare: () => Promise<string>) {
-  signal.throwIfAborted()
-  return new Promise<string>((resolve, reject) => {
+/** 房间资料准备最多三十秒；已发出的音乐查询由原有期限收尾。 */
+async function prepareSummaryWithinDeadline(roomId: string) {
+  const signal = AbortSignal.timeout(30_000)
+  const prompt = await new Promise<string>((resolve, reject) => {
     const abort = () => reject(signal.reason)
     signal.addEventListener('abort', abort, { once: true })
-    prepare()
+    prepareSummary(roomId, signal)
       .then(resolve, reject)
       .finally(() => signal.removeEventListener('abort', abort))
   })
-}
-
-/** 本人收藏由服务端读取，准备和模型阶段均随客户端取消。 */
-export function playlistAnalysisHandler(request: Request) {
-  return businessRequest(request, async (userId, requestId) => {
-    const release = acquireAiTask(`playlist:${userId}`)
-    try {
-      const model = createBailianModel()
-      const signal = AbortSignal.any([request.signal, AbortSignal.timeout(30_000)])
-      const prompt = await prepareWithin(signal, () => preparePlaylist(userId, signal))
-      signal.throwIfAborted()
-      await chargeAiQuota(userId, 'playlist')
-
-      return generateStream({
-        model,
-        prompt,
-        system: playlistSystem,
-        maxOutputTokens: 1200,
-        signal: AbortSignal.any([request.signal, AbortSignal.timeout(60_000)]),
-        requestId,
-        release,
-      })
-    } catch (error) {
-      release()
-      throw aiError(error)
-    }
-  })
+  signal.throwIfAborted()
+  return prompt
 }
 
 /** 状态查询不调用模型、不计次数，也不给无历史凭证的人返回正文。 */
@@ -87,34 +59,26 @@ export function generateSummaryHandler(request: Request, context: SummaryContext
     if (current.status === 'generating')
       throw new BusinessError('AI_IN_PROGRESS', '房间总结正在生成，请稍后查看', 409)
 
-    const release = acquireAiTask(`summary:${roomId}`)
+    const release = acquireAiTask(roomId)
     let attemptId: string | null = null
     try {
-      const { attemptId: claimedId } = await claimRoomSummary(userId, roomId)
+      const claimedId = await claimRoomSummary(userId, roomId)
       if (!claimedId) {
         release()
         return savedSummaryResponse(requestId)
       }
       attemptId = claimedId
       const model = createBailianModel()
-      const signal = AbortSignal.timeout(30_000)
-      const prompt = await prepareWithin(signal, () => prepareSummary(roomId, signal))
-      signal.throwIfAborted()
-      await chargeAiQuota(userId, 'summary')
+      const prompt = await prepareSummaryWithinDeadline(roomId)
+      await chargeAiQuota(userId)
 
-      return generateStream({
+      return streamSummary({
         model,
         prompt,
-        system: summarySystem,
-        maxOutputTokens: 2000,
-        signal: AbortSignal.timeout(60_000),
+        roomId,
+        attemptId: claimedId,
         requestId,
         release,
-        save: async (text) => {
-          if (!(await finishSummary(roomId, claimedId, text, null)))
-            throw new BusinessError('AI_SAVE_FAILED', '总结未保存成功，请刷新状态后重试', 502)
-        },
-        fail: (code) => finishSummary(roomId, claimedId, null, code),
       })
     } catch (error) {
       release()
@@ -125,24 +89,21 @@ export function generateSummaryHandler(request: Request, context: SummaryContext
   })
 }
 
-/** 两类业务仅共用模型调用、原生流转发及完整性检查；保存完成后才发送正常结束。 */
-function generateStream({
+/** 房间总结持续生成并回写当前尝试，完整正文保存后才发送正常结束。 */
+function streamSummary({
   model,
   prompt,
-  system,
-  maxOutputTokens,
-  signal,
+  roomId,
+  attemptId,
   requestId,
   release,
-  save,
-  fail,
-}: GenerationOptions) {
-  signal.throwIfAborted()
+}: SummaryGeneration) {
+  const signal = AbortSignal.timeout(60_000)
   const result = streamText({
     model,
-    system,
+    system: summarySystem,
     prompt,
-    maxOutputTokens,
+    maxOutputTokens: 2000,
     maxRetries: 0,
     // 流边界统一记录安全错误，关闭 SDK 默认的上游原文日志。
     onError() {},
@@ -170,11 +131,12 @@ function generateStream({
               : '模型未返回完整内容，请手动重试',
             502,
           )
-        await save?.(text)
+        if (!(await finishSummary(roomId, attemptId, text, null)))
+          throw new BusinessError('AI_SAVE_FAILED', '总结未保存成功，请刷新状态后重试', 502)
         writer.write({ type: 'finish', finishReason: 'stop' })
       } catch (error) {
         const failure = aiError(error)
-        await fail?.(failure.code)
+        await finishSummary(roomId, attemptId, null, failure.code)
         throw failure
       } finally {
         release()

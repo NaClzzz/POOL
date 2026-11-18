@@ -41,30 +41,13 @@ export function LobbyPage() {
         <CreateRoomDialog />
       </PageHeader>
       <div className={sharedStyles.pageToolbar}>
-        <div className={styles.roomFilters}>
-          {['全部房间', '松弛一下', '深夜电台', '一起发呆'].map((tag) => (
-            <button
-              key={tag}
-              className={cn(
-                cn(styles.filterButton, (tag === '全部房间' ? !q : q === tag) && styles.active),
-                sharedStyles.action,
-              )}
-              onClick={() => {
-                setQ(tag === '全部房间' ? '' : tag)
-                setInput('')
-              }}
-            >
-              {tag}
-            </button>
-          ))}
-        </div>
-        <form className={sharedStyles.smallSearch} onSubmit={search}>
+        <form className={cn(sharedStyles.smallSearch, styles.roomSearch)} onSubmit={search}>
           <Search size={16} />
           <Input
             variant="embedded"
             density="compact"
             aria-label="搜索房间"
-            placeholder="搜索房间名或房间号"
+            placeholder="搜索房间名、标签或房间号"
             value={input}
             onChange={(e) => setInput(e.target.value)}
           />

@@ -5,7 +5,6 @@ import type { MusicAdapter } from '../adapter'
 import { BusinessError } from '../../http/errors'
 import { readServerEnv } from '../../env'
 import { musicCache, withMusicBudget } from '../runtime'
-import { neteasePlaylistId } from '../validation'
 
 /** 网易云 JSON 专用实例，不继承 POOL 认证信息，也不使用环境变量 HTTP 代理。 */
 const neteaseHttp = axios.create({
@@ -57,6 +56,29 @@ function trackOf(song: z.infer<typeof songSchema>): Track {
 /** 在适配器入口校验网易云条目 ID 的格式。 */
 function neteaseId(id: string) {
   if (!/^[1-9]\d{0,19}$/.test(id)) throw new BusinessError('INVALID_INPUT', '网易云条目 ID 无效')
+  return id
+}
+
+/** 只解析网易云正式分享地址中的歌单 ID，不向用户指定的地址发请求。 */
+function neteasePlaylistId(value: string) {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new BusinessError('INVALID_PLAYLIST_LINK', '请输入网易云歌单链接')
+  }
+  if (
+    !['https:', 'http:'].includes(url.protocol) ||
+    !['music.163.com', 'y.music.163.com'].includes(url.hostname) ||
+    url.username ||
+    url.password ||
+    (url.port && !['80', '443'].includes(url.port))
+  )
+    throw new BusinessError('INVALID_PLAYLIST_LINK', '请使用 music.163.com 的完整歌单链接')
+  const path = url.hash.startsWith('#/') ? new URL(url.hash.slice(1), url.origin) : url
+  const id = path.searchParams.get('id')
+  if (!/\/(?:m\/)?playlist\/?$/.test(path.pathname) || !id || !/^[1-9]\d{0,19}$/.test(id))
+    throw new BusinessError('INVALID_PLAYLIST_LINK', '歌单链接需要包含有效的 playlist?id=...')
   return id
 }
 
@@ -185,7 +207,6 @@ export const neteaseAdapter: MusicAdapter = {
   },
   getPlaylistTracks: async (url, offset, limit) => {
     const id = neteasePlaylistId(url)
-    neteaseId(id)
     const result = await musicCache(`netease:playlist:${id}`, 120, () =>
       upstream('/playlist/detail', { id, n: '100000' }, playlistSchema),
     )

@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiSuccess, Track, LikedTrack } from '@/contracts/domain'
-import type { Page, ImportLikesResult } from '@/contracts/music'
+import type { Page, ImportLikesResult, ImportPlaylistInput } from '@/contracts/music'
 import { useSession } from '@/stores/session'
-import { http } from '../http'
+import { http, HttpError } from '../http'
+import { notifyError, notifySuccess } from '../notifications'
 import type { MutationSuccessOptions } from './types'
 
 /** 喜欢接口 */
@@ -35,11 +36,8 @@ export const likesApi = {
     return response.data.data
   },
   /** 导入链接交给服务端解析及容量检查。 */
-  import: async (url: string) => {
-    const response = await http.post<ApiSuccess<ImportLikesResult>>('/likes/import', {
-      source: 'netease',
-      url,
-    })
+  import: async (input: ImportPlaylistInput) => {
+    const response = await http.post<ApiSuccess<ImportLikesResult>>('/likes/import', input)
     return response.data.data
   },
 }
@@ -64,7 +62,12 @@ export function useAddLike(
     onMutate: () => useSession.getState().user?.id,
     onSuccess: async (data, track, userId) => {
       await client.invalidateQueries({ queryKey: ['likes', userId], exact: true })
-      if (useSession.getState().user?.id === userId) await options.onSuccess?.(data, track)
+      if (useSession.getState().user?.id !== userId) return
+      notifySuccess(data.added ? '已加入喜欢' : '歌曲已在喜欢列表中')
+      await options.onSuccess?.(data, track)
+    },
+    onError: (error, _track, userId) => {
+      if (useSession.getState().user?.id === userId) notifyError(error)
     },
   })
 }
@@ -77,7 +80,12 @@ export function useRemoveLike(options: MutationSuccessOptions<null, Track> = {})
     onMutate: () => useSession.getState().user?.id,
     onSuccess: async (data, track, userId) => {
       await client.invalidateQueries({ queryKey: ['likes', userId], exact: true })
-      if (useSession.getState().user?.id === userId) await options.onSuccess?.(data, track)
+      if (useSession.getState().user?.id !== userId) return
+      notifySuccess('已取消喜欢')
+      await options.onSuccess?.(data, track)
+    },
+    onError: (error, _track, userId) => {
+      if (useSession.getState().user?.id === userId) notifyError(error)
     },
   })
 }
@@ -90,20 +98,42 @@ export function useClearLikes(options: MutationSuccessOptions<null> = {}) {
     onMutate: () => useSession.getState().user?.id,
     onSuccess: async (data, variables, userId) => {
       await client.invalidateQueries({ queryKey: ['likes', userId], exact: true })
-      if (useSession.getState().user?.id === userId) await options.onSuccess?.(data, variables)
+      if (useSession.getState().user?.id !== userId) return
+      notifySuccess('喜欢列表已清空')
+      await options.onSuccess?.(data, variables)
+    },
+    onError: (error, _variables, userId) => {
+      if (useSession.getState().user?.id === userId) notifyError(error)
     },
   })
 }
 
 /** 歌单链接导入 */
-export function useImportLikes(options: MutationSuccessOptions<ImportLikesResult, string> = {}) {
+export function useImportLikes(
+  options: MutationSuccessOptions<ImportLikesResult, ImportPlaylistInput> = {},
+) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: likesApi.import,
     onMutate: () => useSession.getState().user?.id,
-    onSuccess: async (data, url, userId) => {
+    onSuccess: async (data, input, userId) => {
       await client.invalidateQueries({ queryKey: ['likes', userId], exact: true })
-      if (useSession.getState().user?.id === userId) await options.onSuccess?.(data, url)
+      if (useSession.getState().user?.id !== userId) return
+      notifySuccess(
+        `已导入 ${data.added} 首歌曲`,
+        `重复 ${data.duplicates} 首 · 失败 ${data.failed} 首 · 剩余容量 ${data.remainingCapacity} 首` +
+          (data.capacitySkipped ? ` · 容量跳过 ${data.capacitySkipped} 首` : '') +
+          (data.hasMore ? '；歌单还有未读取曲目' : ''),
+      )
+      await options.onSuccess?.(data, input)
+    },
+    onError: (error, _input, userId) => {
+      if (
+        error instanceof HttpError &&
+        ['INVALID_INPUT', 'INVALID_PLAYLIST_LINK'].includes(error.code)
+      )
+        return
+      if (useSession.getState().user?.id === userId) notifyError(error)
     },
   })
 }

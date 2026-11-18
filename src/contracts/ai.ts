@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-/** JSON 与流式成功竞态共用的共享总结投影，不包含内部尝试和触发用户。 */
+/** 共享总结的持久状态投影，不包含内部尝试和触发用户。 */
 export const roomSummarySchema = z.object({
   roomId: z.string(),
   status: z.enum(['idle', 'generating', 'failed', 'succeeded']),

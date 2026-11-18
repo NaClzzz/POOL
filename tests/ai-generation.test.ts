@@ -33,13 +33,12 @@ vi.mock('@/server/ai/runtime', () => ({
   chargeAiQuota: mocks.charge,
 }))
 vi.mock('@/server/ai/service', () => ({
-  preparePlaylist: mocks.prepare,
   prepareSummary: mocks.prepare,
   getRoomSummary: mocks.summary,
   claimRoomSummary: mocks.claim,
 }))
 vi.mock('@/server/ai/repository', () => ({ finishSummary: mocks.finish }))
-import { playlistAnalysisHandler, generateSummaryHandler } from '@/server/ai/handlers'
+import { generateSummaryHandler } from '@/server/ai/handlers'
 
 /** SDK 测试模型的真实流片段，避免手工替代 SDK 的结束和取消逻辑。 */
 type ModelPart =
@@ -95,7 +94,7 @@ beforeEach(() => {
   mocks.prepare.mockResolvedValue('资料')
   mocks.finish.mockResolvedValue(true)
   mocks.summary.mockResolvedValue({ status: 'idle' })
-  mocks.claim.mockResolvedValue({ summary: { status: 'generating' }, attemptId: 'attempt' })
+  mocks.claim.mockResolvedValue('attempt')
 })
 afterEach(() => {
   vi.clearAllMocks()
@@ -121,7 +120,7 @@ describe('AI 期限、取消和保存失败', () => {
     expect(mocks.release).not.toHaveBeenCalled()
   })
   it('认领时另一请求已保存总结，同样只结束流并释放本次资格', async () => {
-    mocks.claim.mockResolvedValueOnce({ attemptId: null })
+    mocks.claim.mockResolvedValueOnce(null)
     const response = await generateSummaryHandler(
       new Request('http://pool/api', { method: 'POST' }),
       { params: Promise.resolve({ roomId: 'room' }) },
@@ -133,10 +132,13 @@ describe('AI 期限、取消和保存失败', () => {
   })
   it('准备超过三十秒不启动模型、不计额度并释放任务', async () => {
     mocks.prepare.mockImplementationOnce(() => new Promise(() => {}))
-    const pending = playlistAnalysisHandler(new Request('http://pool/api', { method: 'POST' }))
+    const pending = generateSummaryHandler(new Request('http://pool/api', { method: 'POST' }), {
+      params: Promise.resolve({ roomId: 'room' }),
+    })
     await vi.advanceTimersByTimeAsync(30_001)
     const response = await pending
     expect(response.status).toBe(504)
+    expect(mocks.finish).toHaveBeenCalledWith('room', 'attempt', null, 'AI_TIMEOUT')
     expect(mocks.charge).not.toHaveBeenCalled()
     expect(mocks.release).toHaveBeenCalledOnce()
   })
@@ -150,19 +152,6 @@ describe('AI 期限、取消和保存失败', () => {
     await vi.advanceTimersByTimeAsync(60_001)
     expect(await text).toMatch(/超时/)
     expect(mocks.finish).toHaveBeenCalledWith('room', 'attempt', null, 'AI_TIMEOUT')
-    expect(mocks.release).toHaveBeenCalledOnce()
-  })
-  it('歌单分析取消会中断 SDK 并释放任务，不误报为成功', async () => {
-    mocks.model.mockReturnValue(model(true))
-    const controller = new AbortController()
-    const response = await playlistAnalysisHandler(
-      new Request('http://pool/api', { method: 'POST', signal: controller.signal }),
-    )
-    const text = response.text()
-    await vi.advanceTimersByTimeAsync(1)
-    controller.abort()
-    await vi.advanceTimersByTimeAsync(1)
-    expect(await text).not.toMatch(/"finishReason":"stop"/)
     expect(mocks.release).toHaveBeenCalledOnce()
   })
   it('完整模型输出也必须先保存成功，保存失败不会发送成功结束事件', async () => {

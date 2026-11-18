@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { AccountSessionProvider } from '@/features/auth/session-provider'
 import { PLAYER_VOLUME_KEY, usePlayer } from '@/stores/player'
 import { PersonalAudio } from '@/features/player/audio'
+import { Toaster } from '@/components/ui/toast'
 
 /** 应用级查询容器与个人音频生命周期，房间不在这里建立连接。 */
 export function Providers({ children }: { children: ReactNode }) {
@@ -22,10 +23,12 @@ export function Providers({ children }: { children: ReactNode }) {
   }, [])
   return (
     <QueryClientProvider client={client}>
-      <AccountSessionProvider>
-        {children}
-        <PersonalAudio />
-      </AccountSessionProvider>
+      <Toaster>
+        <AccountSessionProvider>
+          {children}
+          <PersonalAudio />
+        </AccountSessionProvider>
+      </Toaster>
     </QueryClientProvider>
   )
 }

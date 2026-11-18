@@ -124,8 +124,13 @@ describe('Axios 业务 JSON 客户端', () => {
     expect(received.slice(0, 2).map((request) => request.method)).toEqual(['DELETE', 'DELETE'])
     expect(received[1].url).toBe('/api/likes/clear')
     const url = 'https://music.163.com/#/playlist?id=123'
-    await api.likesApi.import(url)
+    await api.likesApi.import({ source: 'netease', url })
     expect(received[2].body).toEqual({ source: 'netease', url })
+    await api.likesApi.import({ source: 'bilibili', url: 'https://www.bilibili.com/list/123' })
+    expect(received[3].body).toEqual({
+      source: 'bilibili',
+      url: 'https://www.bilibili.com/list/123',
+    })
   })
 
   it('401 保留业务错误并触发会话刷新', async () => {

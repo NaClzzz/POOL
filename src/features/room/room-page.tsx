@@ -112,9 +112,9 @@ export function RoomPage({ code }: { code: string }) {
         {connection !== 'joined' && (
           <div className={styles.connectionBanner}>正在恢复房间连接，期间暂不能操作。</div>
         )}
-        {(session.commandError || error) && (
+        {error && (
           <p className={shared.inlineError} role="alert">
-            {session.commandError || error?.message}
+            {error.message}
           </p>
         )}
         <div className={styles.roomContent}>
@@ -152,7 +152,6 @@ export function RoomPage({ code }: { code: string }) {
           snapshot={snapshot}
           connected={connection === 'joined'}
           open={queueOpen}
-          error={session.commandError || session.notice}
           command={command}
         />
       </div>

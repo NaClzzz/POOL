@@ -7,7 +7,7 @@ export interface MusicAdapter {
   getTrack(id: string, extra?: Track['extra']): Promise<Track>
   getLyrics(id: string, extra?: Track['extra']): Promise<Lyrics>
   resolvePlayback(id: string, extra?: Track['extra']): Promise<PlaybackResource>
-  getPlaylistTracks(id: string, offset: number, limit: number): Promise<PlaylistTracks>
+  getPlaylistTracks(url: string, offset: number, limit: number): Promise<PlaylistTracks>
 }
 
 /** 服务层只按平台标识选择适配器，接口实现名称不进入业务数据。 */

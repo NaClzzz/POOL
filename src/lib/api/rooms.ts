@@ -3,7 +3,8 @@ import type { ApiSuccess } from '@/contracts/domain'
 import type { Page } from '@/contracts/music'
 import type { CreateRoom, Room, RoomHistory } from '@/contracts/room'
 import { useSession } from '@/stores/session'
-import { http } from '../http'
+import { http, HttpError } from '../http'
+import { notifyError, notifySuccess } from '../notifications'
 import type { MutationSuccessOptions } from './types'
 
 /** 房间 HTTP 只承载大厅、创建与本人历史，不维护实时快照。 */
@@ -65,7 +66,13 @@ export function useCreateRoom(options: MutationSuccessOptions<Room, CreateRoom> 
     onMutate: () => useSession.getState().user?.id,
     onSuccess: async (room, input, userId) => {
       await client.invalidateQueries({ queryKey: ['rooms', userId] })
-      if (userId === useSession.getState().user?.id) await options.onSuccess?.(room, input)
+      if (userId !== useSession.getState().user?.id) return
+      notifySuccess('房间已创建')
+      await options.onSuccess?.(room, input)
+    },
+    onError: (error, _input, userId) => {
+      if (error instanceof HttpError && error.code === 'INVALID_INPUT') return
+      if (userId === useSession.getState().user?.id) notifyError(error)
     },
   })
 }
@@ -88,7 +95,12 @@ export function useDeleteRoomHistory(options: MutationSuccessOptions<null, strin
       client.removeQueries({ queryKey: ['room-history-detail', userId, roomId] })
       client.removeQueries({ queryKey: ['room-summary', userId, roomId] })
       await client.invalidateQueries({ queryKey: ['room-history', userId] })
-      if (userId === useSession.getState().user?.id) await options.onSuccess?.(data, roomId)
+      if (userId !== useSession.getState().user?.id) return
+      notifySuccess('已删除这条房间历史')
+      await options.onSuccess?.(data, roomId)
+    },
+    onError: (error, _roomId, userId) => {
+      if (userId === useSession.getState().user?.id) notifyError(error)
     },
   })
 }

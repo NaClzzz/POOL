@@ -1,11 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { cleanLyrics, sampleLyrics, playlistPrompt, summaryPrompt } from '@/server/ai/prompts'
+import { cleanLyrics, sampleLyrics, summaryPrompt } from '@/server/ai/prompts'
 import { catalog } from './fixtures/tracks'
 
 describe('AI 输入与歌词抽样', () => {
-  it('清理 LRC 标签，收藏截取千字，房间保留完整歌词', () => {
+  it('清理 LRC 标签，保留完整原文歌词', () => {
     const lrc = '[ar:作者]\n[00:01.00]' + '歌'.repeat(1600) + '\n[00:02.00]结尾'
-    expect(cleanLyrics(lrc, 1000)).toHaveLength(1000)
     expect(cleanLyrics(lrc)).toBe('歌'.repeat(1600) + '\n结尾')
   })
   it('去重候选，最多尝试十首并取五首完整歌词', async () => {
@@ -39,6 +38,5 @@ describe('AI 输入与歌词抽样', () => {
     const expected = tracks.map(({ title, author, album }) => ({ title, author, album }))
     expect(parsed.tracks).toEqual(expected)
     expect(parsed.messages[0].content).toHaveLength(13000)
-    expect(JSON.parse(playlistPrompt(tracks, []).split('\n')[1]).tracks).toEqual(expected)
   })
 })

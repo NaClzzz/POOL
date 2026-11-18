@@ -6,8 +6,9 @@ import { BusinessError } from '../http/errors'
 const globalState = globalThis as typeof globalThis & { poolAiTasks?: Set<string> }
 const tasks = (globalState.poolAiTasks ??= new Set<string>())
 
-/** 保证同用户分析／同房总结唯一，并限制全站十个任务。 */
-export function acquireAiTask(key: string) {
+/** 每房最多一个总结任务，全站最多十个；不排队。 */
+export function acquireAiTask(roomId: string) {
+  const key = `summary:${roomId}`
   if (tasks.has(key)) throw new BusinessError('AI_IN_PROGRESS', '已有生成任务正在进行', 409)
   if (tasks.size >= 10) throw new BusinessError('AI_BUSY', '当前生成任务较多，请稍后重试', 503)
   tasks.add(key)
@@ -30,10 +31,10 @@ redis.call('INCR',KEYS[1]); if minute==0 then redis.call('EXPIRE',KEYS[1],60) en
 redis.call('INCR',KEYS[2]); if day==0 then redis.call('EXPIRE',KEYS[2],86400) end
 return {1,0}`
 
-/** 临近模型启动才扣触发用户额度；两类 AI 功能独立，Redis 故障关闭入口。 */
-export async function chargeAiQuota(userId: string, kind: 'playlist' | 'summary') {
+/** 临近模型启动才扣触发用户的跨房额度；Redis 故障关闭入口。 */
+export async function chargeAiQuota(userId: string) {
   const id = createHash('sha256').update(userId).digest('hex')
-  const prefix = `${process.env.POOL_AI_NAMESPACE || 'pool:ai:v1'}:${kind}:${id}`
+  const prefix = `${process.env.POOL_AI_NAMESPACE || 'pool:ai:v1'}:summary:${id}`
   let result: [number, number]
   try {
     result = (await (

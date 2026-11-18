@@ -1,25 +1,8 @@
 import { paginationSchema } from '@/server/http/validation'
 import { describe, expect, it } from 'vitest'
-import { neteasePlaylistId, trackSchema } from '@/server/music/validation'
+import { trackSchema } from '@/server/music/validation'
 
 describe('音乐入口契约', () => {
-  it.each([
-    'https://music.163.com/playlist?id=3778678',
-    'https://music.163.com/#/playlist?id=3778678',
-    'https://y.music.163.com/m/playlist?id=3778678&userid=1',
-  ])('识别正式歌单链接 %s', (url) => {
-    expect(neteasePlaylistId(url)).toBe('3778678')
-  })
-  it.each([
-    'https://evil.example/playlist?id=1',
-    'https://music.163.com.evil.example/playlist?id=1',
-    'https://music.163.com/song?id=1',
-    'file:///playlist?id=1',
-    'https://u:p@music.163.com/playlist?id=1',
-    'https://music.163.com/playlist?id=NaN',
-  ])('拒绝非歌单或不可信链接 %s', (url) => {
-    expect(() => neteasePlaylistId(url)).toThrow()
-  })
   it('入口分页拒绝负值和超过单次上限的查询', () => {
     expect(paginationSchema.parse({})).toEqual({ offset: 0, limit: 20 })
     expect(() => paginationSchema.parse({ offset: -1 })).toThrow()

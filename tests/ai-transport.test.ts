@@ -1,22 +1,23 @@
 // @vitest-environment jsdom
 import { act, createElement, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
+vi.mock('@/lib/notifications', () => ({ notifySuccess: vi.fn(), notifyError: vi.fn() }))
 vi.mock('@/lib/auth-client', () => ({ authClient: { getSession: vi.fn() } }))
 vi.mock('@/stores/session', () => ({
   useSession: (select: (s: { user: { id: string } }) => unknown) => select({ user: { id: 'a' } }),
 }))
 import { authClient } from '@/lib/auth-client'
-import { usePlaylistAnalysisGeneration } from '@/lib/api-client'
-import { usePlaylistAnalysis } from '@/stores/playlist-analysis'
+import { useRoomSummaryGeneration } from '@/lib/api-client'
 
-let root: Root, host: HTMLDivElement
-let generation: ReturnType<typeof usePlaylistAnalysisGeneration>
+let root: Root, host: HTMLDivElement, client: QueryClient
+let generation: ReturnType<typeof useRoomSummaryGeneration>
 
 /** 从公开业务 hook 验证内部请求边界，不为测试导出内部 fetch。 */
 function Probe() {
-  const current = usePlaylistAnalysisGeneration()
+  const current = useRoomSummaryGeneration('room')
   useEffect(() => {
     generation = current
   })
@@ -33,23 +34,25 @@ async function send() {
 }
 
 beforeEach(async () => {
-  localStorage.clear()
-  usePlaylistAnalysis.setState({ results: {} })
+  client = new QueryClient()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   host = document.createElement('div')
   document.body.append(host)
   root = createRoot(host)
-  await act(async () => root.render(createElement(Probe)))
+  await act(async () =>
+    root.render(createElement(QueryClientProvider, { client }, createElement(Probe))),
+  )
 })
 afterEach(async () => {
   await act(async () => root.unmount())
   host.remove()
+  client.clear()
   vi.unstubAllGlobals()
   vi.clearAllMocks()
 })
 
 describe('AI Completion 请求边界', () => {
-  it('固定分析接口只提交触发动作，SDK 解析原生正文流', async () => {
+  it('固定总结接口只提交触发动作，SDK 解析原生正文流', async () => {
     const network = vi.fn(async () =>
       createUIMessageStreamResponse({
         stream: createUIMessageStream({
@@ -68,7 +71,7 @@ describe('AI Completion 请求边界', () => {
     expect(generation.text).toBe('真实流式内容')
     expect(generation.error).toBeUndefined()
     const [input, init] = vi.mocked(fetch).mock.calls[0]
-    expect(input).toBe('/api/ai/liked-playlist-analysis')
+    expect(input).toBe('/api/rooms/room/summary')
     expect(init?.method).toBe('POST')
     expect(JSON.parse(init?.body as string)).toEqual({})
   })
@@ -127,7 +130,6 @@ describe('AI Completion 请求边界', () => {
     expect(generation.text).toBe('')
     expect(generation.error).toBeUndefined()
     expect(generation.pending).toBe(false)
-    expect(usePlaylistAnalysis.getState().results).toEqual({})
   })
   it('非 JSON 或格式损坏的响应返回统一错误', async () => {
     vi.stubGlobal(
@@ -160,8 +162,11 @@ describe('AI Completion 请求边界', () => {
       }),
     )
     await send()
-    await act(async () => generation.stop())
+    await act(async () => root.render(null))
     expect(signal!.aborted).toBe(true)
+    await act(async () =>
+      root.render(createElement(QueryClientProvider, { client }, createElement(Probe))),
+    )
     expect(generation.error).toBeUndefined()
 
     vi.stubGlobal(
@@ -180,8 +185,11 @@ describe('AI Completion 请求边界', () => {
       }),
     )
     await send()
-    await act(async () => generation.stop())
+    await act(async () => root.render(null))
     expect(signal!.aborted).toBe(true)
+    await act(async () =>
+      root.render(createElement(QueryClientProvider, { client }, createElement(Probe))),
+    )
     expect(generation.error).toBeUndefined()
   })
 })

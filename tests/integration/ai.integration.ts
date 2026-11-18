@@ -102,12 +102,9 @@ const { rooms, roomHistory, roomPlayedSongs, roomMessages } = await import(
   '../../src/server/db/rooms-schema'
 )
 const { roomSummaries } = await import('../../src/server/db/ai-schema')
-const { likedSongs } = await import('../../src/server/db/likes-schema')
 const { handleAuthRequest } = await import('../../src/server/auth/handler')
 const { getRedis, redis } = await import('../../src/server/redis')
-const { playlistAnalysisHandler, getSummaryHandler, generateSummaryHandler } = await import(
-  '../../src/server/ai/handlers'
-)
+const { getSummaryHandler, generateSummaryHandler } = await import('../../src/server/ai/handlers')
 const { claimRoomSummary } = await import('../../src/server/ai/service')
 const { finishSummary } = await import('../../src/server/ai/repository')
 const { chargeAiQuota, acquireAiTask } = await import('../../src/server/ai/runtime')
@@ -142,7 +139,7 @@ async function register(): Promise<Account> {
 }
 /** 请求不传用户 ID，只由 Cookie 确定调用者。 */
 function req(account: Account, method = 'POST', signal?: AbortSignal) {
-  return new Request(`${base}/api/ai/test`, {
+  return new Request(`${base}/api/rooms/test/summary`, {
     method,
     headers: { cookie: account.cookie, origin: base },
     signal,
@@ -250,53 +247,29 @@ after(async () => {
 })
 
 describe('真实 AI SDK、账号、PostgreSQL 与 Redis', { concurrency: false }, () => {
-  it('拒绝未登录、外站请求和空收藏，不启动模型', async () => {
+  it('拒绝未登录与外站请求，不启动模型', async () => {
     assert.equal(
-      (await playlistAnalysisHandler(new Request(`${base}/api/ai/test`, { method: 'POST' })))
-        .status,
+      (
+        await generateSummaryHandler(
+          new Request(`${base}/api/rooms/test/summary`, { method: 'POST' }),
+          context('room'),
+        )
+      ).status,
       401,
     )
     assert.equal(
       (
-        await playlistAnalysisHandler(
-          new Request(`${base}/api/ai/test`, {
+        await generateSummaryHandler(
+          new Request(`${base}/api/rooms/test/summary`, {
             method: 'POST',
             headers: { cookie: a.cookie, origin: 'https://evil.test' },
           }),
+          context('room'),
         )
       ).status,
       403,
     )
-    assert.equal((await playlistAnalysisHandler(req(a))).status, 400)
     assert.equal(requests.length, 0)
-  })
-  it('收藏分析读取本人完整歌名、最多五份千字歌词并使用原生 SSE', async () => {
-    await clearQuota()
-    await db
-      .insert(likedSongs)
-      .values(Array.from({ length: 7 }, (_, i) => ({ ...track(100000 + i), userId: a.id })))
-    await db
-      .insert(likedSongs)
-      .values({ ...track(199999), title: '另一用户的私有收藏', userId: b.id })
-    const response = await playlistAnalysisHandler(req(a))
-    assert.match(response.headers.get('Content-Type')!, /text\/event-stream/)
-    assert.ok(response.headers.get('X-Request-Id'))
-    const stream = await response.text()
-    assert.match(stream, /text-delta/)
-    assert.match(stream, /finish/)
-    const request = requests.at(-1)!
-    assert.equal(request.model, 'qwen3.8-flash')
-    assert.equal(request.max_tokens, 1200)
-    assert.equal(request.enable_thinking, false)
-    const input = JSON.parse(
-      request.messages.find((m) => m.role === 'user')!.content.split('\n')[1],
-    )
-    assert.equal(input.tracks.length, 7)
-    assert.ok(input.tracks.every((s: Track) => s.author === '作者' && s.album === '测试专辑'))
-    assert.equal(input.lyrics.length, 5)
-    assert.ok(input.lyrics.every((s: Track) => s.author === '作者' && s.album === '测试专辑'))
-    assert.ok(input.lyrics.every((s: { lyrics: string }) => s.lyrics.length === 1000))
-    assert.ok(!JSON.stringify(input).includes('另一用户'))
   })
   it('活动房间、无历史与已过期房间不能生成或查看', async () => {
     const active = await seedRoom(1, 1, true)
@@ -320,6 +293,8 @@ describe('真实 AI SDK、账号、PostgreSQL 与 Redis', { concurrency: false }
     assert.equal(state.status, 'succeeded')
     assert.match(state.content, /一起听见/)
     const request = requests.at(-1)!
+    assert.equal(request.model, 'qwen3.8-flash')
+    assert.equal(request.enable_thinking, false)
     assert.equal(request.max_tokens, 2000)
     const input = JSON.parse(
       request.messages.find((m) => m.role === 'user')!.content.split('\n')[1],
@@ -377,7 +352,7 @@ describe('真实 AI SDK、账号、PostgreSQL 与 Redis', { concurrency: false }
     assert.equal(requests.length, before + 1)
     mode = 'normal'
   })
-  it('总结按触发用户跨房限流，另一用户可生成，同用户分析额度独立', async () => {
+  it('总结按触发用户跨房限流，另一用户可生成', async () => {
     await clearQuota()
     const id = await seedRoom(),
       second = await seedRoom()
@@ -388,9 +363,6 @@ describe('真实 AI SDK、账号、PostgreSQL 与 Redis', { concurrency: false }
     assert.equal((await saved(second)).status, 'failed')
     await (await generateSummaryHandler(req(b), context(second))).text()
     assert.equal((await saved(second)).status, 'succeeded')
-    assert.equal((await playlistAnalysisHandler(req(a))).status, 200)
-    // 完整读取，确保本次任务完成并释放资格。
-    await new Promise((resolve) => setTimeout(resolve, 80))
   })
   it('失败重试可由其他参与者触发，截断内容不保存为成功', async () => {
     await clearQuota()
@@ -424,20 +396,23 @@ describe('真实 AI SDK、账号、PostgreSQL 与 Redis', { concurrency: false }
       .where(eq(roomSummaries.roomId, id))
     assert.equal((await saved(id)).status, 'failed')
     const current = await claimRoomSummary(b.id, id)
-    assert.equal(await finishSummary(id, old.attemptId!, '过时正文', null), false)
-    assert.equal(await finishSummary(id, current.attemptId!, '当前正文', null), true)
+    assert.equal(await finishSummary(id, old!, '过时正文', null), false)
+    assert.equal(await finishSummary(id, current!, '当前正文', null), true)
     assert.equal((await saved(id)).content, '当前正文')
   })
   it('空输入不计次数，缺少密钥返回配置错误，且释放任务资格', async () => {
     await clearQuota()
     const empty = await seedRoom(0, 0)
     assert.equal((await generateSummaryHandler(req(a), context(empty))).status, 400)
+    const id = await seedRoom()
     const original = process.env.DASHSCOPE_API_KEY
     delete process.env.DASHSCOPE_API_KEY
-    assert.equal((await playlistAnalysisHandler(req(a))).status, 503)
+    assert.equal((await generateSummaryHandler(req(a), context(id))).status, 503)
     process.env.DASHSCOPE_API_KEY = original
-    assert.equal((await playlistAnalysisHandler(req(a))).status, 200)
-    await new Promise((resolve) => setTimeout(resolve, 80))
+    const response = await generateSummaryHandler(req(a), context(id))
+    assert.equal(response.status, 200)
+    await response.text()
+    assert.equal((await saved(id)).status, 'succeeded')
   })
   it('每日额度上限十次，限流拒绝不继续增加日额度', async () => {
     await clearQuota()
@@ -445,17 +420,17 @@ describe('真实 AI SDK、账号、PostgreSQL 与 Redis', { concurrency: false }
       hash = createHash('sha256').update(a.id).digest('hex')
     for (let i = 0; i < 10; i++) {
       await client.del(`${namespace}:summary:${hash}:minute`)
-      await chargeAiQuota(a.id, 'summary')
+      await chargeAiQuota(a.id)
     }
     await client.del(`${namespace}:summary:${hash}:minute`)
-    await assert.rejects(chargeAiQuota(a.id, 'summary'), { code: 'RATE_LIMITED' })
+    await assert.rejects(chargeAiQuota(a.id), { code: 'RATE_LIMITED' })
     assert.equal(await client.get(`${namespace}:summary:${hash}:day`), '10')
   })
   it('全站满额不认领房间也不扣用户额度', async () => {
     await clearQuota()
     const completedRoom = await seedRoom()
     const attempt = await claimRoomSummary(a.id, completedRoom)
-    await finishSummary(completedRoom, attempt.attemptId!, '已完成总结', null)
+    await finishSummary(completedRoom, attempt!, '已完成总结', null)
     const before = requests.length
     const releases = Array.from({ length: 10 }, (_, i) => acquireAiTask(`fixture:${i}`))
     try {
@@ -473,7 +448,7 @@ describe('真实 AI SDK、账号、PostgreSQL 与 Redis', { concurrency: false }
   it('到期清理级联删除总结、聊天、节目和全部访问记录', async () => {
     const id = await seedRoom()
     const attempt = await claimRoomSummary(a.id, id)
-    assert.equal(await finishSummary(id, attempt.attemptId!, '保存正文', null), true)
+    assert.equal(await finishSummary(id, attempt!, '保存正文', null), true)
     await db
       .update(rooms)
       .set({ expiresAt: new Date(Date.now() - 1) })

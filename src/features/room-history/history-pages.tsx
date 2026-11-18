@@ -104,7 +104,6 @@ export function HistoryPage() {
             删除后无法再访问该房间详情，其他参与者的历史不受影响。
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {remove.error && <p className={sharedStyles.inlineError}>{remove.error.message}</p>}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={remove.isPending}>取消</AlertDialogCancel>
           <AlertDialogAction

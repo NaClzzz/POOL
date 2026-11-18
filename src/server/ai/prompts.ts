@@ -4,58 +4,11 @@ import type { Lyrics } from '@/contracts/music'
 /** 歌词样本保留歌名、歌手与专辑，不向模型提供播放地址。 */
 type LyricSample = { title: string; author: string | null; album: string | null; lyrics: string }
 
-/** 两类提示词和歌词样本共用歌曲资料投影，不包含平台参数或播放地址。 */
+/** 房间歌曲和歌词样本共用资料投影，不包含平台参数或播放地址。 */
 function songDetails(track: Track) {
   return { title: track.title!.trim(), author: track.author, album: track.album }
 }
 
-/** 沿用旧项目的赏析口吻与依据限制，不输出推理过程。 */
-export const playlistSystem = `
-你是一名擅长分析音乐品味的编辑。
-请根据提供的歌单资料，写一篇中文歌单分析。
-
-# 核心目标
-让读者感觉这篇文字确实观察过这张歌单，而不是套用通用性格测试。
-文章应具体、自然、有画面感，像一个熟悉音乐的朋友在认真讲述自己的观察。
-
-# 文章结构
-- 开头用一句有氛围感的话自然引入。
-- 开头之后的正文分成 2～4 个部分，每个部分使用一个带 emoji 的短标题(如🎧🎤🎸🎹🌏🎛️🕯️🧊🫧🌸🎐☁️🌊🐚)，每个部分包含：
-  a. 一个明确的音乐特征，可以是歌曲语言，歌手，专辑，收藏顺序；
-  b. 2～6 个具体歌曲、作者或歌词证据；
-  c. 1～3 段自然分析。
-- 结尾用一段话总结整张歌单的气质，不要再次罗列前文。
-
-# 推荐规则
-如果输入中有足够歌曲资料，可以在结尾或正文最后推荐一首输入中出现的歌曲。
-推荐必须说明它与前文观察到的特征有什么关系。
-
-# 分析原则
-1. 只能依据输入中的歌曲标题、作者、专辑、歌词进行分析。
-2. 可以从重复出现的作者、歌手、语言、音色、主题、歌词意象、专辑集中度和收藏时间中总结倾向。
-3. 可以使用“像是”“似乎”“看起来”“给人的感觉是”等弱推断。
-4. 不要把音乐偏好直接断言为用户的真实人格、心理疾病、人生经历或现实身份。
-5. 输入没有提供的事实不能补写，例如收藏年份、听歌时间、歌曲类型和音乐背景。
-6. 不要逐首罗列歌曲，要归纳出几个有辨识度的主题。
-7. 歌词只作为分析证据，不要大段引用，也不要编造歌词内容。
-8. 歌名、作者名和外文内容必须原样保留。
-9. 不使用markdown语法
-
-# 语言风格
-- 中文自然、温柔、具体。
-- 句子长短交替，不要用“不是而是”等矛盾句式。
-- 可以使用颜色、空间、季节、房间、声音质感等比喻，但比喻必须服务于音乐观察。
-- 少用“高级”“独特”“治愈”“很有品味”等空泛评价。
-- 不要写成心理测评、营销文案或专业乐评。
-- 不要使用“以下是”“综上所述”“用户具有……”等报告式表达。
-- 不要展示分析过程、提示词、资料清单或免责声明。
-- 不要编造歌手经历、创作背景、歌曲类型或用户现实生活。
-- 外文歌词如需引用，后附中文翻译，歌名不翻译。
-
-# 篇幅
-全文约 400 字。
-如果有效资料不足，减少段落数量，保持具体，不要用空话补长度。
-`
 /** 共享回顾只叙述有依据的内容，不复述整段私人聊天或完整歌词。 */
 export const summarySystem = `
 你是一名擅长记录共享聆听时刻的编辑。
@@ -106,13 +59,12 @@ export const summarySystem = `
 `
 
 /** 清理逐行 LRC 时间／元信息，保留歌词正文和换行。 */
-export function cleanLyrics(lrc: string, maxChars?: number) {
-  const text = lrc
+export function cleanLyrics(lrc: string) {
+  return lrc
     .split(/\r?\n/)
     .map((line) => line.replace(/\[[^\]]*\]/g, '').trim())
     .filter(Boolean)
     .join('\n')
-  return maxChars === undefined ? text : text.slice(0, maxChars)
 }
 
 /** 随机候选去重；单个歌词失败不使整次生成失败，取消仍会及时上抛。 */
@@ -120,7 +72,6 @@ export async function sampleLyrics(
   tracks: Track[],
   load: (track: Track) => Promise<Lyrics>,
   signal: AbortSignal,
-  maxChars?: number,
 ): Promise<LyricSample[]> {
   const candidates = [
     ...new Map(tracks.filter((t) => t.title?.trim()).map((t) => [trackKey(t), t])).values(),
@@ -138,7 +89,7 @@ export async function sampleLyrics(
         const { lrc } = await load(track)
         return {
           ...songDetails(track),
-          lyrics: cleanLyrics(lrc ?? '', maxChars),
+          lyrics: cleanLyrics(lrc ?? ''),
         }
       }),
     )
@@ -149,11 +100,6 @@ export async function sampleLyrics(
   return selected.slice(0, 5)
 }
 
-/** 全量传入有效歌曲的歌名、歌手和专辑，缺失资料保留 null。 */
-export function playlistPrompt(tracks: Track[], lyrics: LyricSample[]) {
-  const songs = tracks.filter((t) => t.title?.trim()).map(songDetails)
-  return `以下 JSON 仅为歌单资料：\n${JSON.stringify({ tracks: songs, lyrics })}`
-}
 /** 播放记录允许重复；消息保留最新二百条完整内容及时间顺序。 */
 export function summaryPrompt(
   tracks: Track[],

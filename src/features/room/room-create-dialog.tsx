@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { Plus } from 'lucide-react'
 import { useCreateRoom } from '@/lib/api-client'
+import { HttpError } from '@/lib/http'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -140,7 +141,9 @@ export function CreateRoomDialog() {
           {Object.keys(form.formState.errors).length > 0 && (
             <p className={sharedStyles.inlineError}>请检查名称、标签和人数设置。</p>
           )}
-          {create.error && <p className={sharedStyles.inlineError}>{create.error.message}</p>}
+          {create.error instanceof HttpError && create.error.code === 'INVALID_INPUT' && (
+            <p className={sharedStyles.inlineError}>{create.error.message}</p>
+          )}
           <Button type="submit" className="mt-5 w-full" disabled={create.isPending}>
             <Plus />
             {create.isPending ? '正在创建…' : '创建并进入'}

@@ -28,6 +28,9 @@ export type PlaylistTracks = {
   }
   tracks: Page<Track>
 }
+/** 导入请求只提交平台身份和歌单链接，平台引用由适配器解析。 */
+export type ImportPlaylistInput = { source: Track['source']; url: string }
+
 /** 仅反馈已处理的导入结果，未读取的剩余数量允许未知。 */
 export type ImportLikesResult = {
   added: number

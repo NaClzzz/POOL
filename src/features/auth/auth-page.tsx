@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { ArrowRight, LoaderCircle } from 'lucide-react'
-import { authClient, authErrorMessage } from '@/lib/auth-client'
+import { isAccountFormError, useAuthenticate } from '@/lib/api-client'
 import { authReturnTo } from '@/lib/auth-redirect'
 import { useSession } from '@/stores/session'
 import { Button } from '@/components/ui/button'
@@ -25,36 +25,19 @@ export function AuthPage({ registerMode = false }: { registerMode?: boolean }) {
   const {
     register,
     handleSubmit,
-    setError,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm<AuthFields>({ defaultValues: { email: '', password: '', name: '' } })
   const returnTo = authReturnTo(params.get('returnTo'))
+  const authenticate = useAuthenticate(registerMode, {
+    onSuccess: () => {
+      router.replace(returnTo)
+      router.refresh()
+    },
+  })
 
   useEffect(() => {
     if (ready && user) router.replace(returnTo)
   }, [ready, user, returnTo, router])
-  /** 表单复用认证库的原生协议，注册与登录使用不同端点。 */
-  const submit = async (values: AuthFields) => {
-    try {
-      const credentials = { email: values.email.trim(), password: values.password }
-      const result = registerMode
-        ? await authClient.signUp.email({ ...credentials, name: values.name.trim() })
-        : await authClient.signIn.email(credentials)
-      if (result.error) {
-        setError('root', { message: authErrorMessage(result.error) })
-        return
-      }
-      const sessionResult = await authClient.getSession({ query: { disableCookieCache: true } })
-      if (sessionResult.error || !sessionResult.data) {
-        setError('root', { message: '无法确认登录会话，请重试' })
-        return
-      }
-      router.replace(returnTo)
-      router.refresh()
-    } catch {
-      setError('root', { message: '无法连接账号服务，请稍后重试' })
-    }
-  }
   return (
     <main className={styles.authPage}>
       <section className={styles.authFormWrap}>
@@ -63,7 +46,7 @@ export function AuthPage({ registerMode = false }: { registerMode?: boolean }) {
             POOL
           </Link>
           <h1 className={styles.authTitle}>{registerMode ? '注册' : '登录'}</h1>
-          <form onSubmit={handleSubmit(submit)} noValidate>
+          <form onSubmit={handleSubmit((values) => authenticate.mutate(values))} noValidate>
             {registerMode && (
               <label className={sharedStyles.field}>
                 昵称
@@ -114,14 +97,16 @@ export function AuthPage({ registerMode = false }: { registerMode?: boolean }) {
                 <span className={sharedStyles.fieldError}>{errors.password.message}</span>
               )}
             </label>
-            {errors.root && <p className={sharedStyles.inlineError}>{errors.root.message}</p>}
+            {isAccountFormError(authenticate.error) && (
+              <p className={sharedStyles.inlineError}>{authenticate.error.message}</p>
+            )}
             <Button
               type="submit"
               size="lg"
               className="mt-3 w-full"
-              disabled={isSubmitting || !ready}
+              disabled={authenticate.isPending || !ready}
             >
-              {isSubmitting ? <LoaderCircle className="animate-spin" /> : null}
+              {authenticate.isPending ? <LoaderCircle className="animate-spin" /> : null}
               {registerMode ? '创建账号' : '登录'}
               <ArrowRight />
             </Button>

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { authClient, authErrorMessage } from '@/lib/auth-client'
+import { isAccountFormError, useUpdateAccount } from '@/lib/api-client'
 import { useSession } from '@/stores/session'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,39 +28,29 @@ export function AccountActions() {
   const user = useSession((state) => state.user!)
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<'name' | 'password'>('name')
-  const [notice, setNotice] = useState('')
   const form = useForm<AccountFields>({
     shouldUnregister: true,
     defaultValues: { name: user.name, currentPassword: '', newPassword: '', confirmPassword: '' },
   })
 
-  /** 修改完成后重新读取服务端会话，确保昵称及新会话 Cookie 生效。 */
-  const submit = async (values: AccountFields) => {
-    try {
-      const result =
-        mode === 'name'
-          ? await authClient.updateUser({ name: values.name.trim() })
-          : await authClient.changePassword({
-              currentPassword: values.currentPassword,
-              newPassword: values.newPassword,
-              revokeOtherSessions: true,
-            })
-      if (result.error) {
-        form.setError('root', { message: authErrorMessage(result.error) })
-        return
-      }
-      await authClient.getSession({ query: { disableCookieCache: true } })
+  const update = useUpdateAccount({
+    onSuccess: (_data, input) => {
       setOpen(false)
       form.reset({
-        name: mode === 'name' ? values.name.trim() : user.name,
+        name: input.mode === 'name' ? input.name : user.name,
         currentPassword: '',
         newPassword: '',
         confirmPassword: '',
       })
-      setNotice(mode === 'name' ? '昵称已更新' : '密码已更新，其他登录会话已退出')
-    } catch {
-      form.setError('root', { message: '无法连接账号服务，请稍后重试' })
-    }
+    },
+  })
+  /** 表单只提交当前操作的输入，成功收尾与请求反馈由业务 hook 协调。 */
+  const submit = (values: AccountFields) => {
+    update.mutate(
+      mode === 'name'
+        ? { mode, name: values.name.trim() }
+        : { mode, currentPassword: values.currentPassword, newPassword: values.newPassword },
+    )
   }
 
   return (
@@ -69,6 +59,7 @@ export function AccountActions() {
         open={open}
         onOpenChange={(value) => {
           setOpen(value)
+          update.reset()
           if (!value)
             form.reset({
               name: user.name,
@@ -83,7 +74,7 @@ export function AccountActions() {
             render={<Button variant="outline" size="sm" />}
             onClick={() => {
               setMode('name')
-              setNotice('')
+              update.reset()
               form.reset({
                 name: user.name,
                 currentPassword: '',
@@ -98,7 +89,7 @@ export function AccountActions() {
             render={<Button variant="outline" size="sm" />}
             onClick={() => {
               setMode('password')
-              setNotice('')
+              update.reset()
               form.reset()
             }}
           >
@@ -165,17 +156,17 @@ export function AccountActions() {
                 {error.message}
               </p>
             ))}
-            <Button className="mt-4 w-full" type="submit" disabled={form.formState.isSubmitting}>
-              {form.formState.isSubmitting ? '正在保存…' : '保存'}
+            {isAccountFormError(update.error) && (
+              <p role="alert" className={styles.fieldError}>
+                {update.error.message}
+              </p>
+            )}
+            <Button className="mt-4 w-full" type="submit" disabled={update.isPending}>
+              {update.isPending ? '正在保存…' : '保存'}
             </Button>
           </form>
         </DialogContent>
       </Dialog>
-      {notice && (
-        <p role="status" className="mt-3 text-xs text-primary">
-          {notice}
-        </p>
-      )}
     </div>
   )
 }

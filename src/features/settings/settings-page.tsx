@@ -16,15 +16,10 @@ export function SettingsPage() {
   const user = useSession((s) => s.user!)
   const volume = usePlayer((s) => s.volume)
   const setVolume = usePlayer((s) => s.setVolume)
-  const { logout, pending, error: logoutError } = useLogout()
+  const { logout, pending } = useLogout()
   return (
     <div className={styles.settingsPage}>
       <PageHeader name="Settings" title="设置" />
-      {logoutError && (
-        <p role="alert" className={shared.inlineError}>
-          {logoutError}
-        </p>
-      )}
       <section className={styles.settingsSection}>
         <div className={styles.settingsSectionHeading}>
           <h2 className={styles.sectionTitle}>我的账号</h2>

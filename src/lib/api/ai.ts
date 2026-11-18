@@ -2,14 +2,14 @@
 import { useCompletion } from '@ai-sdk/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { JsonToSseTransformStream, parseJsonEventStream, uiMessageChunkSchema } from 'ai'
-import { useEffect, useId, useRef, useState } from 'react'
+import { createRef, useEffect, useId, useRef, useState } from 'react'
 import { z } from 'zod'
 import type { ApiSuccess } from '@/contracts/domain'
 import type { RoomSummaryDto } from '@/contracts/ai'
 import { useSession } from '@/stores/session'
-import { usePlaylistAnalysis } from '@/stores/playlist-analysis'
 import { authClient } from '../auth-client'
 import { http, HttpError } from '../http'
+import { notifyError, notifySuccess } from '../notifications'
 
 /** 持久总结状态使用普通 Axios；模型生成流走 AI SDK 的独立传输。 */
 export const aiApi = {
@@ -22,35 +22,7 @@ export const aiApi = {
   },
 }
 
-/** 歌单分析 hook */
-export function usePlaylistAnalysisGeneration() {
-  const userId = useSession((s) => s.user?.id)
-
-  // 本地持久化
-  const saved = usePlaylistAnalysis((s) => (userId ? s.results[userId] : undefined))
-  const save = usePlaylistAnalysis((s) => s.save)
-
-  const generation = useAiGeneration('/api/ai/liked-playlist-analysis', {
-    onSuccess: (text) => {
-      if (userId) save(userId, text)
-    },
-  })
-  useEffect(() => {
-    void usePlaylistAnalysis.persist.rehydrate()
-  }, [])
-  return { ...generation, text: generation.text || saved || '' }
-}
-
-/** 房间总结生成 hook */
-export function useRoomSummaryGeneration(roomId: string) {
-  const client = useQueryClient()
-  const userId = useSession((s) => s.user?.id)
-  return useAiGeneration(`/api/rooms/${encodeURIComponent(roomId)}/summary`, {
-    onSettled: () => void client.invalidateQueries({ queryKey: ['room-summary', userId, roomId] }),
-  })
-}
-
-/** 房间总结获取 hook*/
+/** 查询共享总结，生成期间轮询持久状态。 */
 export function useRoomSummary(roomId: string, receiving = false) {
   const userId = useSession((s) => s.user?.id)
   return useQuery({
@@ -103,12 +75,6 @@ const completionFetch: typeof fetch = async (input, init) => {
   )
 }
 
-/** 完整成功与请求结束分别通知业务层，错误和取消不覆盖已有结果。 */
-type GenerationCallbacks = {
-  onSuccess?: (text: string) => void
-  onSettled?: () => void
-}
-
 /** SDK 解析和编码原生事件，只补充正常结束检查；正文仍交给 useCompletion 管理。 */
 const checkedCompletionFetch: typeof fetch = async (input, init) => {
   const response = await completionFetch(input, init)
@@ -144,19 +110,26 @@ const checkedCompletionFetch: typeof fetch = async (input, init) => {
   return new Response(stream, response)
 }
 
-/** SDK 直接管理单段正文；按账号和页面实例隔离临时内容，离页停止接收。 */
-function useAiGeneration(api: string, { onSuccess, onSettled }: GenerationCallbacks = {}) {
+/** SDK 管理房间总结流；离页仅停止接收，结束后刷新发起账号与房间的持久状态。 */
+export function useRoomSummaryGeneration(roomId: string) {
+  const client = useQueryClient()
   const userId = useSession((s) => s.user?.id)
+  const api = `/api/rooms/${encodeURIComponent(roomId)}/summary`
   const instanceId = useId()
   const id = `${userId}:${api}:${instanceId}`
   const requestId = useRef(0)
   // useCompletion 的 error 属于组件状态，只在发起它的账号下展示。
   const [requestedId, setRequestedId] = useState<string>()
+  // 与当前 render 的 complete 绑定，旧请求的错误不会污染新请求。
+  const streamError = createRef<Error>()
   const { completion, isLoading, error, complete, stop, setCompletion } = useCompletion({
     id,
     api,
     streamProtocol: 'data',
     fetch: checkedCompletionFetch,
+    onError: (failure) => {
+      streamError.current = failure
+    },
   })
   useEffect(
     () => () => {
@@ -167,27 +140,23 @@ function useAiGeneration(api: string, { onSuccess, onSettled }: GenerationCallba
     [id, stop, setCompletion],
   )
 
-  /** 通过原生结束检查后才通知成功；失效请求不保存，请求结束始终刷新共享状态。 */
+  /** 通过原生结束检查后才通知成功；失效请求不通知，结束后仍刷新原房间状态。 */
   const generate = () => {
     if (isLoading) return
     const currentRequest = ++requestId.current
     setRequestedId(id)
     void complete('')
       .then((text) => {
-        if (requestId.current === currentRequest && text?.trim()) onSuccess?.(text)
+        if (requestId.current !== currentRequest) return
+        if (streamError.current) notifyError(streamError.current)
+        else if (text?.trim()) notifySuccess('房间总结已生成')
       })
-      .finally(onSettled)
-  }
-  /** 停止时立即使成功回调失效，不依赖底层网络及时响应取消。 */
-  const stopGeneration = () => {
-    requestId.current++
-    stop()
+      .finally(() => client.invalidateQueries({ queryKey: ['room-summary', userId, roomId] }))
   }
   return {
     text: completion,
     pending: isLoading,
     error: requestedId === id ? error : undefined,
     generate,
-    stop: stopGeneration,
   }
 }
