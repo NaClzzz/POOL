@@ -5,6 +5,7 @@ import type { MusicAdapter } from '../adapter'
 import { BusinessError } from '../../http/errors'
 import { readServerEnv } from '../../env'
 import { musicCache, withMusicBudget } from '../runtime'
+import { neteasePlaylistId } from '../validation'
 
 /** 网易云 JSON 专用实例，不继承 POOL 认证信息，也不使用环境变量 HTTP 代理。 */
 const neteaseHttp = axios.create({
@@ -182,7 +183,8 @@ export const neteaseAdapter: MusicAdapter = {
       duration_ms: track.duration_ms,
     }
   },
-  getPlaylistTracks: async (id, offset, limit) => {
+  getPlaylistTracks: async (url, offset, limit) => {
+    const id = neteasePlaylistId(url)
     neteaseId(id)
     const result = await musicCache(`netease:playlist:${id}`, 120, () =>
       upstream('/playlist/detail', { id, n: '100000' }, playlistSchema),

@@ -1,7 +1,6 @@
 import type { MusicSource, Track } from '@/contracts/domain'
 import type { MusicAdapters } from './adapter'
 import { neteaseAdapter } from './adapters/netease'
-import { neteasePlaylistId } from './validation'
 import { BusinessError } from '../http/errors'
 
 const adapters: MusicAdapters = {
@@ -26,5 +25,5 @@ export const musicService = {
   resolvePlayback: (source: MusicSource, id: string, extra: Track['extra'] = null) =>
     adapterFor(source).resolvePlayback(id, extra),
   getPlaylistTracks: (source: MusicSource, url: string, offset: number, limit: number) =>
-    adapterFor(source).getPlaylistTracks(neteasePlaylistId(url), offset, limit),
+    adapterFor(source).getPlaylistTracks(url, offset, limit),
 }
