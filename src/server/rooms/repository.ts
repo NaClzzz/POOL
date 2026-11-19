@@ -1,5 +1,19 @@
 import { randomUUID } from 'node:crypto'
-import { and, eq, lt, desc, asc, gt, gte, or, isNull, ilike, inArray, sql } from 'drizzle-orm'
+import {
+  and,
+  eq,
+  lt,
+  desc,
+  asc,
+  gt,
+  gte,
+  or,
+  isNull,
+  ilike,
+  inArray,
+  sql,
+  count,
+} from 'drizzle-orm'
 import { db } from '../db'
 import { user } from '../db/schema'
 import { likedSongs } from '../db/likes-schema'
@@ -170,6 +184,20 @@ export async function listHistory(userId: string) {
     .innerJoin(user, eq(user.id, rooms.ownerId))
     .where(eq(roomHistory.userId, userId))
     .orderBy(desc(roomHistory.lastJoinedAt), asc(rooms.id))
+}
+/** 参与者取成功加入记录，不随个人历史删除而减少；计数只读取保留记录。 */
+export async function historyActivity(roomId: string) {
+  const [participants, [played], [messages]] = await Promise.all([
+    db
+      .select({ userId: user.id, name: user.name, image: user.image })
+      .from(roomMembers)
+      .innerJoin(user, eq(user.id, roomMembers.userId))
+      .where(eq(roomMembers.roomId, roomId))
+      .orderBy(asc(roomMembers.joinedAt), asc(user.id)),
+    db.select({ total: count() }).from(roomPlayedSongs).where(eq(roomPlayedSongs.roomId, roomId)),
+    db.select({ total: count() }).from(roomMessages).where(eq(roomMessages.roomId, roomId)),
+  ])
+  return { participants, playedCount: played.total, messageCount: messages.total }
 }
 /** 删除只撤销当前用户的访问凭证。 */
 export async function deleteHistory(userId: string, roomId: string) {

@@ -16,6 +16,7 @@ import type {
   RoomSettings,
   CreateRoom,
   RoomHistory,
+  RoomHistoryDetail,
 } from '@/contracts/room'
 import * as repo from './repository'
 
@@ -86,10 +87,10 @@ export function deleteHistory(userId: string, roomId: string) {
 }
 
 /** 详情要求本人仍持有有效凭证，权限错误在业务层产生。 */
-export async function historyDetail(userId: string, roomId: string) {
+export async function historyDetail(userId: string, roomId: string): Promise<RoomHistoryDetail> {
   const row = (await listHistory(userId)).find((item) => item.roomId === roomId)
   if (!row) throw new BusinessError('ROOM_HISTORY_REQUIRED', '房间已到期或没有访问记录', 403)
-  return row
+  return { ...row, ...(await repo.historyActivity(roomId)) }
 }
 
 /** 可信身份只从 Better Auth 会话取得。 */

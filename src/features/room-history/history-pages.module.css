@@ -69,7 +69,21 @@
 }
 
 .memoryHeading {
-  margin: 12px 0 28px;
+  margin: 12px 0 20px;
+}
+
+.memoryTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.memoryDetails {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 16px;
 }
 
 .memoryTitle {
@@ -79,10 +93,31 @@
 
 .memoryMeta {
   display: flex;
-  gap: 10px;
+  align-items: center;
+  gap: 20px;
   color: var(--muted-foreground);
   font-size: 12px;
-  margin-top: 15px;
+}
+
+.memoryExpiry {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.memoryStats {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.memoryStats strong {
+  color: var(--foreground);
+  font-weight: 600;
+  margin-left: 4px;
 }
 
 .memoryPaper {
@@ -98,10 +133,4 @@
   font-size: 16px;
   font-weight: 550;
   margin-bottom: 24px;
-}
-
-.memoryPaperBottom {
-  font-size: 11px;
-  color: var(--muted-foreground);
-  padding-top: 20px;
 }

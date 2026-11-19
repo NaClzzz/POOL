@@ -78,6 +78,12 @@ export type RoomSettings = Omit<CreateRoom, 'password'> & {
 }
 /** 历史只代表本人访问凭证，不提供结束后的聊天查询。 */
 export type RoomHistory = Room & { lastJoinedAt: string }
+/** 历史详情补充成功加入过的参与者及保留记录数量，不返回聊天正文。 */
+export type RoomHistoryDetail = RoomHistory & {
+  participants: Pick<Member, 'userId' | 'name' | 'image'>[]
+  playedCount: number
+  messageCount: number
+}
 /** 导入反馈只统计实际检查过的收藏。 */
 export type RoomImportResult = {
   items: RoomPlaylistItem[]

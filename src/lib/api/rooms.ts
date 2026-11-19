@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiSuccess } from '@/contracts/domain'
 import type { Page } from '@/contracts/music'
-import type { CreateRoom, Room, RoomHistory } from '@/contracts/room'
+import type { CreateRoom, Room, RoomHistory, RoomHistoryDetail } from '@/contracts/room'
 import { useSession } from '@/stores/session'
 import { http, HttpError } from '../http'
 import { notifyError, notifySuccess } from '../notifications'
@@ -36,10 +36,10 @@ export const roomsApi = {
     return (await http.delete<ApiSuccess<null>>(`/room-history/${encodeURIComponent(roomId)}`)).data
       .data
   },
-  /** 历史详情包含房间资料，共享总结由独立接口读取。 */
+  /** 历史详情包含房间资料、参与者与互动计数，总结由独立接口读取。 */
   async historyDetail(roomId: string, signal?: AbortSignal) {
     return (
-      await http.get<ApiSuccess<RoomHistory>>(`/room-history/${encodeURIComponent(roomId)}`, {
+      await http.get<ApiSuccess<RoomHistoryDetail>>(`/room-history/${encodeURIComponent(roomId)}`, {
         signal,
       })
     ).data.data

@@ -14,6 +14,7 @@ import type {
   RoomAck,
   RoomCommandResult,
   RoomSnapshot,
+  RoomHistoryDetail,
 } from '../../src/contracts/room'
 
 process.env.POOL_AUTH_RATE_NAMESPACE = `pool:test:rooms:${randomUUID()}`
@@ -498,6 +499,77 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
     const owner = await connect(users[1].cookie)
     await snapshot(owner, 'room:join', { roomCode: other.roomCode, password: 'secret-other' })
     await command(owner, 'room:dissolve', {})
+  })
+  it('历史详情包含去重参与者和保留记录计数，删除凭证不影响其他人的参与者展示', async () => {
+    const room = await create(users[0]),
+      a = await connect(users[0].cookie),
+      tab = await connect(users[0].cookie),
+      b = await connect(users[1].cookie)
+    await snapshot(a, 'room:join', { roomCode: room.roomCode })
+    await snapshot(tab, 'room:join', { roomCode: room.roomCode })
+    await snapshot(b, 'room:join', { roomCode: room.roomCode })
+    // 本例验证归档读取，持久样本不复用前面聊天限流测试已用满的用户额度。
+    await db.insert(tables.roomMessages).values(
+      [users[0], users[1]].map((account) => ({
+        id: randomUUID(),
+        roomId: room.roomId,
+        userId: account.id,
+        senderName: '测试成员',
+        content: '归档聊天不返回正文',
+        createdAt: new Date(),
+      })),
+    )
+    await snapshot(a, 'room:playlist:clear', {})
+    const { myPlaylist } = await snapshot(a, 'room:playlist:add', {
+      source: 'netease',
+      source_id: '108',
+    })
+    await db.insert(tables.roomPlayedSongs).values({
+      id: randomUUID(),
+      roomId: room.roomId,
+      memberId: users[0].id,
+      track: myPlaylist.find((item) => item.track.source_id === '108')!.track,
+      playbackVersion: 1,
+      playedAt: new Date(),
+    })
+    await command(b, 'room:leave', {})
+    await snapshot(b, 'room:join', { roomCode: room.roomCode })
+    await command(a, 'room:dissolve', {})
+    await roomService.deleteHistory(users[1].id, room.roomId)
+    const context = { params: Promise.resolve({ roomId: room.roomId }) }
+    const response = await detailRoute(
+      new Request(`${base}/api/room-history/${room.roomId}`, {
+        headers: { cookie: users[0].cookie },
+      }),
+      context,
+    )
+    assert.equal(response.status, 200)
+    const detail: RoomHistoryDetail = (await response.json()).data
+    assert.equal(detail.name, room.name)
+    assert.equal(detail.tag, room.tag)
+    assert.ok(detail.endedAt)
+    assert.ok(detail.expiresAt)
+    assert.equal(detail.memberCount, 0)
+    assert.deepEqual(
+      detail.participants.map((p) => p.userId).sort(),
+      [users[0].id, users[1].id].sort(),
+    )
+    assert.ok(detail.participants.every((p) => p.name && p.image === null))
+    assert.equal(detail.playedCount, 1)
+    assert.equal(detail.messageCount, 2)
+    assert.equal('messages' in detail, false)
+    assert.equal('email' in detail.participants[0], false)
+    assert.equal(
+      (
+        await detailRoute(
+          new Request(`${base}/api/room-history/${room.roomId}`, {
+            headers: { cookie: users[1].cookie },
+          }),
+          context,
+        )
+      ).status,
+      403,
+    )
   })
   it('成功加入历史数据库最多五十条，删除凭证不删除归档', async () => {
     const now = Date.now()
