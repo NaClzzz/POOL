@@ -26,6 +26,7 @@ import { PageHeader } from '@/components/page-header'
 /** 本人历史列表，删除只移除本人访问凭证。 */
 export function HistoryPage() {
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [viewedAt] = useState(Date.now)
   const query = useRoomHistory()
   const remove = useDeleteRoomHistory({ onSuccess: () => setDeleting(null) })
   return (
@@ -56,7 +57,9 @@ export function HistoryPage() {
                 <p className={styles.historyMeta}>
                   {formatDate(room.lastJoinedAt)}
                   <span>·</span>
-                  {room.status === 'active' ? '房间还在进行中' : '结束后保留 7 天'}
+                  {room.status === 'active'
+                    ? '房间还在进行中'
+                    : `${Math.max(0, Math.ceil((Date.parse(room.expiresAt!) - viewedAt) / 86_400_000))} 天后过期`}
                 </p>
               </div>
               <div className={styles.historyActions}>
