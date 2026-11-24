@@ -2,10 +2,10 @@
 
 import { useState } from 'react'
 import { Search, Shuffle, Trash2, Upload } from 'lucide-react'
-import type { RoomSnapshot } from '@/contracts/room'
+import type { RoomPlaylistItem, RoomSnapshot } from '@/contracts/room'
 import type { MusicSource } from '@/contracts/domain'
-import type { RoomCommand } from './types'
-import { useMusicSearch } from '@/lib/api-client'
+import { useMusicSearch } from '@/features/music/api'
+import { useRoomPlaylistActions } from './api'
 import { SortableQueue } from '@/features/music/sortable-queue'
 import { TrackList } from '@/features/music/track-list'
 import { Button } from '@/components/ui/button'
@@ -23,23 +23,37 @@ import { cn } from '@/lib/utils'
 import sharedStyles from '@/components/presentation.module.css'
 import styles from './room-playlist-sheet.module.css'
 
-/** 双列抽屉只展示本人的房间歌单，修改仍通过房间页的统一命令入口。 */
+/** 双列抽屉管理本人的房间歌单，写操作通过 HTTP 落库后通知房间同步。 */
 type RoomPlaylistSheetProps = {
   snapshot: RoomSnapshot
   open: boolean
   connected: boolean
-  command: RoomCommand
+  onPlaylistUpdated: (items: RoomPlaylistItem[]) => void
 }
 
 /** 左列搜索加歌、右列管理歌单；两个内容区域独立滚动。 */
-export function RoomPlaylistSheet({ snapshot, open, connected, command }: RoomPlaylistSheetProps) {
+export function RoomPlaylistSheet({
+  snapshot,
+  open,
+  connected,
+  onPlaylistUpdated,
+}: RoomPlaylistSheetProps) {
   const [search, setSearch] = useState('')
   const [keyword, setKeyword] = useState('')
   const [source, setSource] = useState<MusicSource>('netease')
   const [playlistScrollElement, setPlaylistScrollElement] = useState<HTMLDivElement | null>(null)
   const results = useMusicSearch(source, open ? keyword : '')
+  const actions = useRoomPlaylistActions(onPlaylistUpdated)
   const tracks = results.data?.pages.flatMap((page) => page.items) ?? []
-  const disconnected = !connected
+  const busy =
+    !connected ||
+    actions.add.isPending ||
+    actions.remove.isPending ||
+    actions.reorder.isPending ||
+    actions.shuffle.isPending ||
+    actions.clear.isPending ||
+    actions.importLiked.isPending
+
   return (
     <SheetContent className={styles.sheet} aria-describedby={undefined}>
       <SheetHeader>
@@ -103,13 +117,13 @@ export function RoomPlaylistSheet({ snapshot, open, connected, command }: RoomPl
                 tracks={tracks}
                 compact
                 onAdd={(track) =>
-                  void command('room:playlist:add', {
+                  actions.add.mutate({
                     source: track.source,
                     source_id: track.source_id,
                     extra: track.extra,
                   })
                 }
-                disabled={disconnected}
+                disabled={busy}
               />
             ) : (
               <Empty title="没有找到歌曲" />
@@ -132,8 +146,8 @@ export function RoomPlaylistSheet({ snapshot, open, connected, command }: RoomPl
               <Button
                 variant="outline"
                 size="sm"
-                disabled={disconnected}
-                onClick={() => void command('room:playlist:import-liked', {})}
+                disabled={busy}
+                onClick={() => actions.importLiked.mutate()}
               >
                 <Upload />
                 导入喜欢
@@ -141,8 +155,8 @@ export function RoomPlaylistSheet({ snapshot, open, connected, command }: RoomPl
               <Button
                 variant="ghost"
                 size="sm"
-                disabled={disconnected || snapshot.myPlaylist.length < 2}
-                onClick={() => void command('room:playlist:shuffle', {})}
+                disabled={busy || snapshot.myPlaylist.length < 2}
+                onClick={() => actions.shuffle.mutate()}
               >
                 <Shuffle />
                 打乱
@@ -150,8 +164,8 @@ export function RoomPlaylistSheet({ snapshot, open, connected, command }: RoomPl
               <Button
                 variant="ghost"
                 size="sm"
-                disabled={disconnected || !snapshot.myPlaylist.length}
-                onClick={() => void command('room:playlist:clear', {})}
+                disabled={busy || !snapshot.myPlaylist.length}
+                onClick={() => actions.clear.mutate()}
               >
                 <Trash2 />
                 清空
@@ -163,9 +177,9 @@ export function RoomPlaylistSheet({ snapshot, open, connected, command }: RoomPl
               <SortableQueue
                 scrollElement={playlistScrollElement}
                 tracks={snapshot.myPlaylist.map((item) => item.track)}
-                disabled={disconnected}
+                disabled={busy}
                 onMove={(track, toIndex) =>
-                  void command('room:playlist:reorder', {
+                  actions.reorder.mutate({
                     itemId: snapshot.myPlaylist.find(
                       (item) =>
                         item.track.source === track.source &&
@@ -175,13 +189,13 @@ export function RoomPlaylistSheet({ snapshot, open, connected, command }: RoomPl
                   })
                 }
                 onRemove={(track) =>
-                  void command('room:playlist:remove', {
-                    itemId: snapshot.myPlaylist.find(
+                  actions.remove.mutate(
+                    snapshot.myPlaylist.find(
                       (item) =>
                         item.track.source === track.source &&
                         item.track.source_id === track.source_id,
                     )!.itemId,
-                  })
+                  )
                 }
               />
             ) : (

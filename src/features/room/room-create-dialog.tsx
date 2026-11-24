@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { Plus } from 'lucide-react'
-import { useCreateRoom } from '@/lib/api-client'
+import { useCreateRoom } from './api'
 import { HttpError } from '@/lib/http'
 import { Button } from '@/components/ui/button'
 import {

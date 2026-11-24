@@ -17,7 +17,7 @@ import {
   ListOrdered,
 } from 'lucide-react'
 import { usePlayer } from '@/stores/player'
-import { useLikes, useAddLike, useRemoveLike } from '@/lib/api-client'
+import { useLikes, useAddLike, useRemoveLike } from '@/features/likes/api'
 import { trackKey } from '@/contracts/domain'
 import { formatTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'

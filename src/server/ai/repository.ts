@@ -1,4 +1,4 @@
-import { and, desc, eq, gt } from 'drizzle-orm'
+import { and, desc, eq, gt, lte } from 'drizzle-orm'
 import { db } from '../db'
 import { user } from '../db/schema'
 import { rooms, roomHistory, roomMessages, roomPlayedSongs } from '../db/rooms-schema'
@@ -6,15 +6,43 @@ import { roomSummaries } from '../db/ai-schema'
 
 /** 总结状态仅供服务端判断尝试与生成资格。 */
 export type SummaryRow = typeof roomSummaries.$inferSelect
-/** 有锁的归档、本人凭证与当前总结，业务规则由 Service 决定。 */
+/** 归档、本人凭证与当前总结，业务规则由 Service 决定。 */
 export type SummaryAccess = {
   room: typeof rooms.$inferSelect | undefined
   hasHistory: boolean
   summary: SummaryRow | undefined
 }
 
-/** 与历史删除共用用户锁，再锁定房间；资格判断和总结状态写入原子执行。 */
-export async function accessSummary<T>(
+/** 查询总结使用无锁读取，避免多人查看或轮询互相阻塞。 */
+export async function readSummary(userId: string, roomId: string): Promise<SummaryAccess> {
+  const [[room], [history], [summary]] = await Promise.all([
+    db.select().from(rooms).where(eq(rooms.id, roomId)),
+    db
+      .select({ roomId: roomHistory.roomId })
+      .from(roomHistory)
+      .where(and(eq(roomHistory.roomId, roomId), eq(roomHistory.userId, userId))),
+    db.select().from(roomSummaries).where(eq(roomSummaries.roomId, roomId)),
+  ])
+  return { room, hasHistory: !!history, summary }
+}
+
+/** 仅对超期的生成尝试执行条件更新，不阻塞正常查询。 */
+export async function recoverTimedOutSummary(roomId: string, attemptId: string, cutoff: Date) {
+  await db
+    .update(roomSummaries)
+    .set({ status: 'failed', content: null, errorCode: 'AI_TIMEOUT' })
+    .where(
+      and(
+        eq(roomSummaries.roomId, roomId),
+        eq(roomSummaries.attemptId, attemptId),
+        eq(roomSummaries.status, 'generating'),
+        lte(roomSummaries.startedAt, cutoff),
+      ),
+    )
+}
+
+/** 认领生成资格时与历史删除共用用户锁并锁定房间，保证同房互斥。 */
+export async function claimSummary<T>(
   userId: string,
   roomId: string,
   decide: (access: SummaryAccess) => { value: T; write?: typeof roomSummaries.$inferInsert },

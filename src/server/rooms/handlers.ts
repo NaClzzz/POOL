@@ -1,7 +1,7 @@
 import { businessRequest } from '../http/business'
 import { paginationSchema } from '../http/validation'
 import { createRoomSchema } from './validation'
-import * as service from './service'
+import * as service from './http-service'
 
 /** 历史详情路由参数由 Next 提供，访问身份仍取自服务端会话。 */
 type HistoryContext = { params: Promise<{ roomId: string }> }

@@ -1,6 +1,6 @@
 'use client'
 import { Feather, LoaderCircle, RotateCcw } from 'lucide-react'
-import { useRoomSummary, useRoomSummaryGeneration } from '@/lib/api-client'
+import { useRoomSummary, useRoomSummaryGeneration } from './api'
 import { Button } from '@/components/ui/button'
 import { ErrorState, Loading } from '@/components/feedback'
 import styles from './room-summary.module.css'
@@ -17,11 +17,16 @@ export function RoomSummary({ roomId }: { roomId: string }) {
   const retry = query.data.status === 'failed' || !!generation.error
   return (
     <section aria-label="房间总结" aria-busy={working}>
-      {content && <div className={styles.generatedCopy}>{content}</div>}
-      {working && (
+      {content && (
+        <div className={styles.generatedCopy}>
+          {content}
+          {working && <span className={styles.streamCursor} aria-hidden="true" />}
+        </div>
+      )}
+      {working && !content && (
         <p role="status" className={styles.generationStatus}>
           <LoaderCircle className="size-4 animate-spin" />
-          正在生成房间总结…
+          正在整理歌单与歌词…
         </p>
       )}
       {!working && !saved && (

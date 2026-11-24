@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { isAccountFormError, useUpdateAccount } from '@/lib/api-client'
+import { isAccountFormError, useUpdateAccount } from './api'
 import { useSession } from '@/stores/session'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

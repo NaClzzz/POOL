@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RoomHistoryDetail } from '@/contracts/room'
 
 const query = vi.hoisted(() => ({ useRoomHistoryDetail: vi.fn() }))
-vi.mock('@/lib/api-client', () => query)
+vi.mock('@/features/room/api', () => query)
 vi.mock('@/features/ai/room-summary', () => ({
   /** 保留总结区域作为独立生成组件，页头测试不触发模型请求。 */
   RoomSummary: ({ roomId }: { roomId: string }) =>

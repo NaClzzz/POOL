@@ -5,6 +5,22 @@
   color: #536170;
 }
 
+.streamCursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: -0.12em;
+  background-color: var(--primary);
+  animation: stream-blink 1s steps(1) infinite;
+}
+
+@keyframes stream-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 .generationStatus {
   margin-top: 16px;
   display: flex;

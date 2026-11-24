@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
-import { useRoomHistoryDetail } from '@/lib/api-client'
+import { useRoomHistoryDetail } from '@/features/room/api'
 import { Button } from '@/components/ui/button'
 import {
   Avatar,

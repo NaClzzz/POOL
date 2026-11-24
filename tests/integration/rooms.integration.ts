@@ -19,7 +19,6 @@ import type {
 
 process.env.POOL_AUTH_RATE_NAMESPACE = `pool:test:rooms:${randomUUID()}`
 process.env.POOL_MUSIC_NAMESPACE = `pool:test:room-music:${randomUUID()}`
-process.env.ROOM_INTERNAL_SECRET = randomUUID() + randomUUID()
 // 重启扫描会重置在线投影；使用完整隔离 schema，绝不扫描开发库的真实房间。
 const schemaName = `pool_rooms_test_${randomUUID().replaceAll('-', '')}`
 const admin = new Pool({ connectionString: process.env.DATABASE_URL })
@@ -47,7 +46,16 @@ const { getRedis } = await import('../../src/server/redis')
 const repo = await import('../../src/server/rooms/repository')
 const roomService = await import('../../src/server/rooms/service')
 const { createRoomSocketServer } = await import('../../src/server/rooms/socket-server')
-const { POST: resolveTrack } = await import('../../src/app/api/internal/room-track/route')
+const {
+  GET: playlistGetRoute,
+  POST: playlistAddRoute,
+  PATCH: playlistReorderRoute,
+  DELETE: playlistRemoveRoute,
+} = await import('../../src/app/api/room-playlist/route')
+const { DELETE: playlistClearRoute } = await import('../../src/app/api/room-playlist/clear/route')
+const { POST: playlistImportRoute } = await import(
+  '../../src/app/api/room-playlist/import-liked/route'
+)
 const { GET: listRoute, POST: createRoute } = await import('../../src/app/api/rooms/route')
 const { GET: historyRoute } = await import('../../src/app/api/room-history/route')
 const { GET: detailRoute, DELETE: deleteRoute } = await import(
@@ -60,7 +68,7 @@ const run = randomUUID(),
 const clients: Socket<ServerRoomEvents, ClientRoomEvents>[] = []
 let server: Awaited<ReturnType<typeof createRoomSocketServer>>, url: string
 
-/** 实际 Node HTTP fixture 分别模拟网易云详情和 Web 内部音乐路由；不启动应用。 */
+/** 实际 Node HTTP fixture 模拟网易云详情接口；房间歌单由 Web 进程直接调用音乐服务。 */
 const web = createServer(async (request, response) => {
   const path = new URL(request.url!, 'http://localhost')
   if (path.pathname === '/song/detail') {
@@ -82,20 +90,8 @@ const web = createServer(async (request, response) => {
     )
     return
   }
-  let body = ''
-  for await (const chunk of request) body += chunk
-  const result = await resolveTrack(
-    new Request(`http://localhost${request.url}`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-pool-room-secret': String(request.headers['x-pool-room-secret'] ?? ''),
-      },
-      body,
-    }),
-  )
-  response.writeHead(result.status, Object.fromEntries(result.headers))
-  response.end(await result.text())
+  response.writeHead(404)
+  response.end()
 })
 
 /** 本次随机邮箱注册；不打印 Cookie，测试后仅删除本次账号。 */
@@ -188,11 +184,29 @@ async function create(account: (typeof users)[number], password?: string) {
   return data as Awaited<ReturnType<typeof roomService.createRoom>>
 }
 
+/** 房间歌单 HTTP 请求辅助函数，直接走 Web 路由鉴权。 */
+async function playlistAdd(account: (typeof users)[number], source_id: string) {
+  return playlistAddRoute(
+    new Request(`${base}/api/room-playlist`, {
+      method: 'POST',
+      headers: { cookie: account.cookie, origin: base, 'content-type': 'application/json' },
+      body: JSON.stringify({ source: 'netease', source_id }),
+    }),
+  )
+}
+async function playlistClear(account: (typeof users)[number]) {
+  return playlistClearRoute(
+    new Request(`${base}/api/room-playlist/clear`, {
+      method: 'DELETE',
+      headers: { cookie: account.cookie, origin: base },
+    }),
+  )
+}
+
 before(async () => {
   await new Promise<void>((resolve) => web.listen(0, '127.0.0.1', resolve))
   const fixtureURL = `http://127.0.0.1:${(web.address() as AddressInfo).port}`
   process.env.MUSIC_API_BASE_URL = fixtureURL
-  process.env.ROOM_WEB_URL = fixtureURL
   const { readServerEnv } = await import('../../src/server/env')
   readServerEnv().MUSIC_API_BASE_URL = fixtureURL
   server = await createRoomSocketServer()
@@ -231,14 +245,7 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
     await assert.rejects(connect(''))
     await assert.rejects(connect(users[0].cookie, 'https://evil.example'))
     assert.equal((await listRoute(new Request(`${base}/api/rooms`))).status, 401)
-    assert.equal(
-      (
-        await resolveTrack(
-          new Request(`${base}/api/internal/room-track`, { method: 'POST', body: '{}' }),
-        )
-      ).status,
-      403,
-    )
+    assert.equal((await playlistGetRoute(new Request(`${base}/api/room-playlist`))).status, 401)
   })
   it('并发创建仍只有一个有效房间，密码房按完整房间号查询且遵循分页校验', async () => {
     const responses = await Promise.all(
@@ -374,18 +381,15 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
     await snapshot(a, 'room:join', { roomCode: room.roomCode })
     await snapshot(b, 'room:join', { roomCode: room.roomCode })
     await snapshot(c, 'room:join', { roomCode: room.roomCode })
-    assert.equal(
-      (await command(a, 'room:playlist:add', { source: 'netease', source_id: '999' })).ok,
-      false,
-    )
-    let state = await snapshot(a, 'room:playlist:add', { source: 'netease', source_id: '101' })
-    assert.equal(state.myPlaylist[0].track.duration_ms, 120000)
-    assert.equal(
-      (await command(a, 'room:playlist:add', { source: 'netease', source_id: '101' })).ok,
-      false,
-    )
-    await snapshot(a, 'room:playlist:add', { source: 'netease', source_id: '102' })
-    await snapshot(b, 'room:playlist:add', { source: 'netease', source_id: '103' })
+    assert.equal((await playlistAdd(users[0], '999')).status, 409)
+    const added101 = await playlistAdd(users[0], '101')
+    assert.equal(added101.status, 201)
+    assert.equal((await added101.json()).data[0].track.duration_ms, 120000)
+    assert.equal((await playlistAdd(users[0], '101')).status, 409)
+    assert.equal((await playlistAdd(users[0], '102')).status, 201)
+    assert.equal((await playlistAdd(users[1], '103')).status, 201)
+    let state = await snapshot(a, 'room:playlist:sync', {})
+    assert.equal(state.myPlaylist[0].track.source_id, '102')
     state = await snapshot(a, 'room:stage:join', {})
     assert.equal(state.playback.activeMemberId, users[0].id)
     assert.equal(state.playback.track?.source_id, '102')
@@ -443,19 +447,52 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
       { ...track, userId: users[0].id },
       { ...track, source_id: 'no-duration', duration_ms: null, userId: users[0].id },
     ])
-    const result = await command(a, 'room:playlist:import-liked', {})
-    assert.ok(result.ok)
-    assert.equal(result.data.imported?.added, 1)
-    assert.equal(result.data.imported?.failed, 1)
-    await snapshot(a, 'room:playlist:add', { source: 'netease', source_id: '104' })
-    let state = await snapshot(a, 'room:sync', {})
+    const importedRes = await playlistImportRoute(
+      new Request(`${base}/api/room-playlist/import-liked`, {
+        method: 'POST',
+        headers: { cookie: users[0].cookie, origin: base },
+      }),
+    )
+    assert.equal(importedRes.status, 200)
+    const importedData = (await importedRes.json()).data
+    assert.equal(importedData.added, 1)
+    assert.equal(importedData.failed, 1)
+    assert.equal((await playlistAdd(users[0], '104')).status, 201)
+    let state = await snapshot(a, 'room:playlist:sync', {})
     const itemId = state.myPlaylist[0].itemId
-    state = await snapshot(a, 'room:playlist:reorder', { itemId, toIndex: 1 })
+    assert.equal(
+      (
+        await playlistReorderRoute(
+          new Request(`${base}/api/room-playlist`, {
+            method: 'PATCH',
+            headers: {
+              cookie: users[0].cookie,
+              origin: base,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({ itemId, toIndex: 1 }),
+          }),
+        )
+      ).status,
+      200,
+    )
+    state = await snapshot(a, 'room:playlist:sync', {})
     assert.equal(state.myPlaylist[1].itemId, itemId)
-    await snapshot(a, 'room:playlist:remove', { itemId })
+    assert.equal(
+      (
+        await playlistRemoveRoute(
+          new Request(`${base}/api/room-playlist?itemId=${encodeURIComponent(itemId)}`, {
+            method: 'DELETE',
+            headers: { cookie: users[0].cookie, origin: base },
+          }),
+        )
+      ).status,
+      200,
+    )
     state = await snapshot(a, 'room:stage:join', {})
     const version = state.playback.version
-    state = await snapshot(a, 'room:playlist:clear', {})
+    assert.equal((await playlistClear(users[0])).status, 200)
+    state = await snapshot(a, 'room:playlist:sync', {})
     assert.equal(state.myPlaylist.length, 0)
     assert.equal(state.playback.version, version)
     await repo.editPlaylist(users[0].id, () =>
@@ -465,11 +502,8 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
         track: { ...track, source_id: `seed-${i}` },
       })),
     )
-    const results = await Promise.all([
-      command(a, 'room:playlist:add', { source: 'netease', source_id: '105' }),
-      command(tab, 'room:playlist:add', { source: 'netease', source_id: '106' }),
-    ])
-    assert.equal(results.filter((r) => r.ok).length, 1)
+    const results = await Promise.all([playlistAdd(users[0], '105'), playlistAdd(users[0], '106')])
+    assert.equal(results.filter((r) => r.status === 201).length, 1)
     assert.equal((await repo.getPlaylist(users[0].id)).length, 500)
     await command(a, 'room:dissolve', {})
   })
@@ -519,11 +553,10 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
         createdAt: new Date(),
       })),
     )
-    await snapshot(a, 'room:playlist:clear', {})
-    const { myPlaylist } = await snapshot(a, 'room:playlist:add', {
-      source: 'netease',
-      source_id: '108',
-    })
+    await playlistClear(users[0])
+    const added108 = await playlistAdd(users[0], '108')
+    assert.equal(added108.status, 201)
+    const { myPlaylist } = await snapshot(a, 'room:playlist:sync', {})
     await db.insert(tables.roomPlayedSongs).values({
       id: randomUUID(),
       roomId: room.roomId,
@@ -637,8 +670,9 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
       b = await connect(users[1].cookie)
     await snapshot(a, 'room:join', { roomCode: room.roomCode })
     await snapshot(b, 'room:join', { roomCode: room.roomCode })
-    await snapshot(a, 'room:playlist:clear', {})
-    await snapshot(a, 'room:playlist:add', { source: 'netease', source_id: '107' })
+    await playlistClear(users[0])
+    assert.equal((await playlistAdd(users[0], '107')).status, 201)
+    await snapshot(a, 'room:playlist:sync', {})
     const state = await snapshot(a, 'room:stage:join', {})
     assert.equal(
       (
@@ -738,7 +772,7 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
       .where(eq(tables.roomHistory.roomId, room.roomId))
     assert.equal(records.length, 0)
   })
-  it('在线会话被撤销后下一命令拒绝，并清理该连接', async () => {
+  it('在线会话被撤销后敏感命令拒绝，并清理该连接', async () => {
     const a = await connect(users[2].cookie)
     await handleAuthRequest(
       new Request(`${base}/api/auth/sign-out`, {
@@ -748,8 +782,8 @@ describe('真实一起听 HTTP、Socket.IO 与 PostgreSQL', { concurrency: false
       }),
     )
     const left = new Promise<void>((resolve) => a.once('disconnect', () => resolve()))
-    // 会话失效时服务端主动断开，ack 不保证在断开前送达。
-    a.emit('room:sync', {}, () => undefined)
+    // 会话失效时入房或管理命令立即复查并主动断开，ack 不保证在断开前送达。
+    a.emit('room:join', { roomCode: 'any' }, () => undefined)
     await left
   })
 })

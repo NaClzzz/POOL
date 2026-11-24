@@ -29,20 +29,6 @@ const roomIdSchema = z.string().min(1).max(128)
 /** 所有生成响应禁止缓存与代理缓冲，请求编号由入口补充。 */
 const streamHeaders = { 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' }
 
-/** 房间资料准备最多三十秒；已发出的音乐查询由原有期限收尾。 */
-async function prepareSummaryWithinDeadline(roomId: string) {
-  const signal = AbortSignal.timeout(30_000)
-  const prompt = await new Promise<string>((resolve, reject) => {
-    const abort = () => reject(signal.reason)
-    signal.addEventListener('abort', abort, { once: true })
-    prepareSummary(roomId, signal)
-      .then(resolve, reject)
-      .finally(() => signal.removeEventListener('abort', abort))
-  })
-  signal.throwIfAborted()
-  return prompt
-}
-
 /** 状态查询不调用模型、不计次数，也不给无历史凭证的人返回正文。 */
 export function getSummaryHandler(request: Request, context: SummaryContext) {
   return businessRequest(request, async (userId) => ({
@@ -59,7 +45,7 @@ export function generateSummaryHandler(request: Request, context: SummaryContext
     if (current.status === 'generating')
       throw new BusinessError('AI_IN_PROGRESS', '房间总结正在生成，请稍后查看', 409)
 
-    const release = acquireAiTask(roomId)
+    const release = acquireAiTask()
     let attemptId: string | null = null
     try {
       const claimedId = await claimRoomSummary(userId, roomId)
@@ -69,7 +55,15 @@ export function generateSummaryHandler(request: Request, context: SummaryContext
       }
       attemptId = claimedId
       const model = createBailianModel()
-      const prompt = await prepareSummaryWithinDeadline(roomId)
+      const prepareSignal = AbortSignal.timeout(30_000)
+      const prompt = await Promise.race([
+        prepareSummary(roomId, prepareSignal),
+        new Promise<never>((_, reject) =>
+          prepareSignal.addEventListener('abort', () => reject(prepareSignal.reason), {
+            once: true,
+          }),
+        ),
+      ])
       await chargeAiQuota(userId)
 
       return streamSummary({

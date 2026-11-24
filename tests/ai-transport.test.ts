@@ -10,7 +10,7 @@ vi.mock('@/stores/session', () => ({
   useSession: (select: (s: { user: { id: string } }) => unknown) => select({ user: { id: 'a' } }),
 }))
 import { authClient } from '@/lib/auth-client'
-import { useRoomSummaryGeneration } from '@/lib/api-client'
+import { aiApi, useRoomSummaryGeneration } from '@/features/ai/api'
 
 let root: Root, host: HTMLDivElement, client: QueryClient
 let generation: ReturnType<typeof useRoomSummaryGeneration>
@@ -24,17 +24,25 @@ function Probe() {
   return null
 }
 
-/** 等待真实 SDK 的异步流和错误更新完成。 */
+/** 等待真实 SDK 的异步流、节流刷新和 React 提交完成。 */
 async function send() {
   await act(async () => generation.generate())
-  for (let i = 0; i < 5; i++)
+  for (let i = 0; i < 6; i++)
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 2))
+      await new Promise((resolve) => setTimeout(resolve, 15))
     })
 }
 
 beforeEach(async () => {
   client = new QueryClient()
+  vi.spyOn(aiApi, 'summary').mockResolvedValue({
+    roomId: 'room',
+    status: 'succeeded',
+    content: '真实流式内容',
+    errorCode: null,
+    generatedAt: '2026-11-16',
+    expiresAt: '2026-11-23',
+  })
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   host = document.createElement('div')
   document.body.append(host)

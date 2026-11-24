@@ -1,9 +1,8 @@
 import { useMutation } from '@tanstack/react-query'
 import { useSession } from '@/stores/session'
-import { authClient, authErrorMessage } from '../auth-client'
-import { HttpError } from '../http'
-import { notifyError, notifySuccess } from '../notifications'
-import type { MutationSuccessOptions } from './types'
+import { authClient, authErrorMessage } from '@/lib/auth-client'
+import { HttpError, type MutationSuccessOptions } from '@/lib/http'
+import { notifyError, notifySuccess } from '@/lib/notifications'
 
 /** 账号修改只提交当前操作需要的字段，密码不进入持久状态。 */
 type AccountUpdate =

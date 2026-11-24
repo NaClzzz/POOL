@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { musicApi } from '@/lib/api-client'
+import { musicApi } from '@/features/music/api'
 import { usePlayer } from '@/stores/player'
 import type { Playback } from '@/contracts/room'
 

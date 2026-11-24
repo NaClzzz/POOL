@@ -46,14 +46,21 @@ async function readBody(request: IncomingMessage) {
   return body ? JSON.parse(body) : null
 }
 
-let api: typeof import('@/lib/api-client')
+let api: {
+  musicApi: (typeof import('@/features/music/api'))['musicApi']
+  likesApi: (typeof import('@/features/likes/api'))['likesApi']
+}
 let transport: AxiosInstance
 beforeAll(async () => {
   await new Promise<void>((resolve) => fixture.listen(0, '127.0.0.1', resolve))
   const { http } = await import('@/lib/http')
   expect(http.defaults.baseURL).toBe('/api')
   transport = http
-  api = await import('@/lib/api-client')
+  const [{ musicApi }, { likesApi }] = await Promise.all([
+    import('@/features/music/api'),
+    import('@/features/likes/api'),
+  ])
+  api = { musicApi, likesApi }
   const address = fixture.address() as { port: number }
   transport.defaults.baseURL = `http://127.0.0.1:${address.port}/api`
   transport.defaults.proxy = false

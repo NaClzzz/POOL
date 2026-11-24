@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { redis as authRedis, getRedis } from '../redis'
 export { authRedis }
 
-/** 固定窗口内的计数与过期设置在一次 Lua 调用中原子执行。 */
+/** Lua */
 const consumeScript = `
 local count = redis.call('INCR', KEYS[1])
 if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
@@ -17,7 +17,7 @@ export class AuthLimiterUnavailable extends Error {
   }
 }
 
-/** 向 Better Auth 提供原子消费接口，不在 Redis key 中保存明文邮箱或 IP。 */
+/** Redis 限流 */
 export const authRateLimitStorage = {
   async consume(key: string, rule: { window: number; max: number }) {
     try {

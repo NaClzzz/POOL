@@ -2,7 +2,7 @@
 import { useEffect, useRef } from 'react'
 import { usePlayer } from '@/stores/player'
 import { trackKey } from '@/contracts/domain'
-import { musicApi } from '@/lib/api-client'
+import { musicApi } from '@/features/music/api'
 import { HttpError } from '@/lib/http'
 
 /** 常驻个人音频只播放统一服务解析的真实资源，取消旧解析防止切歌竞争。 */

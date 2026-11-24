@@ -30,7 +30,7 @@ vi.mock('@/lib/auth-client', async (importOriginal) => ({
     changePassword: mocks.changePassword,
   },
 }))
-import { isAccountFormError, useAuthenticate, useUpdateAccount } from '@/lib/api-client'
+import { isAccountFormError, useAuthenticate, useUpdateAccount } from '@/features/auth/api'
 
 let client: QueryClient
 

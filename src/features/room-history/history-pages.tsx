@@ -6,7 +6,7 @@ import sharedStyles from '@/components/presentation.module.css'
 import Link from 'next/link'
 import { useState } from 'react'
 import { ArrowLeft, ArrowUpRight, Clock3, Feather, Headphones, Trash2 } from 'lucide-react'
-import { useRoomHistory, useDeleteRoomHistory } from '@/lib/api-client'
+import { useRoomHistory, useDeleteRoomHistory } from '@/features/room/api'
 import { formatDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {

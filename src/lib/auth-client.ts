@@ -1,7 +1,7 @@
 'use client'
 import { createAuthClient } from 'better-auth/react'
 
-/** 同域 Cookie 认证客户端；会话只由服务端管理，不保存浏览器认证令牌。 */
+/** 客户端 BA 实例 */
 export const authClient = createAuthClient({
   sessionOptions: { refetchOnWindowFocus: true, refetchInterval: 300 },
 })

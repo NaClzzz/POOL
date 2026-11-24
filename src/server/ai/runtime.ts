@@ -2,18 +2,21 @@ import { createHash } from 'node:crypto'
 import { getRedis } from '../redis'
 import { BusinessError } from '../http/errors'
 
-/** Web 单实例共享并发资格；任务结束即释放，不排队也不占用日额度。 */
-const globalState = globalThis as typeof globalThis & { poolAiTasks?: Set<string> }
-const tasks = (globalState.poolAiTasks ??= new Set<string>())
+/** Web 单实例全站并发计数；同房互斥由数据库事务保证。 */
+const globalState = globalThis as typeof globalThis & { poolAiActive?: number }
+const MAX_CONCURRENT_TASKS = 10
 
-/** 每房最多一个总结任务，全站最多十个；不排队。 */
-export function acquireAiTask(roomId: string) {
-  const key = `summary:${roomId}`
-  if (tasks.has(key)) throw new BusinessError('AI_IN_PROGRESS', '已有生成任务正在进行', 409)
-  if (tasks.size >= 10) throw new BusinessError('AI_BUSY', '当前生成任务较多，请稍后重试', 503)
-  tasks.add(key)
+/** 全站最多十个总结任务并发；任务结束即释放，不排队。 */
+export function acquireAiTask() {
+  const active = globalState.poolAiActive ?? 0
+  if (active >= MAX_CONCURRENT_TASKS)
+    throw new BusinessError('AI_BUSY', '当前生成任务较多，请稍后重试', 503)
+  globalState.poolAiActive = active + 1
+  let released = false
   return () => {
-    tasks.delete(key)
+    if (released) return
+    released = true
+    globalState.poolAiActive = Math.max(0, (globalState.poolAiActive ?? 1) - 1)
   }
 }
 

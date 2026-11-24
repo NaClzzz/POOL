@@ -10,7 +10,7 @@
 pnpm install
 ```
 
-首次克隆时将 .env.example 复制为 .env，替换数据库密码、Redis 密码、至少 32 字符的随机认证密钥及独立 ROOM_INTERNAL_SECRET，确保 DATABASE_URL、REDIS_URL 中的密码与容器一致。已有 .env 时保留当前配置。
+首次克隆时将 .env.example 复制为 .env，替换数据库密码、Redis 密码及至少 32 字符的随机认证密钥，确保 DATABASE_URL、REDIS_URL 中的密码与容器一致。已有 .env 时保留当前配置。
 
 ```sh
 pnpm infra:up
@@ -37,7 +37,7 @@ pnpm dev
 pnpm socket:dev
 ```
 
-三个应用进程均由用户手动启动。访问 http://localhost:3000，BETTER_AUTH_URL 必须与浏览器站点地址一致。本地 NEXT_PUBLIC_SOCKET_URL=http://localhost:3002，Socket 绑定 127.0.0.1:3002；Web 与 Socket 共用 ROOM_INTERNAL_SECRET，ROOM_WEB_URL 指向 Web。健康检查 GET http://127.0.0.1:3002/health。浏览器均用 localhost，不混用 127.0.0.1，以便复用 Cookie。基础服务端口仅绑定本机回环地址，数据保存在独立 Docker volume；停止使用 pnpm infra:stop，再次启动使用 pnpm infra:up。
+三个应用进程均由用户手动启动。访问 http://localhost:3000，BETTER_AUTH_URL 必须与浏览器站点地址一致。本地 NEXT_PUBLIC_SOCKET_URL=http://localhost:3002，Socket 绑定 127.0.0.1:3002。健康检查 GET http://127.0.0.1:3002/health。浏览器均用 localhost，不混用 127.0.0.1，以便复用 Cookie。基础服务端口仅绑定本机回环地址，数据保存在独立 Docker volume；停止使用 pnpm infra:stop，再次启动使用 pnpm infra:up。
 
 Compose 固定官方镜像摘要。拉取受网络限制时通过 .env 的 POSTGRES_IMAGE、REDIS_IMAGE 配置可访问的镜像地址并保持相同摘要，详见 [第二阶段交付](docs/开发阶段/02-基础后端与账号系统.md)。
 
@@ -55,7 +55,7 @@ Compose 固定官方镜像摘要。拉取受网络限制时通过 .env 的 POSTG
 
 ## 数据与服务边界
 
-浏览器请求分为 src/lib/http.ts（Axios 实例、/api 前缀和响应拦截器）与 src/lib/api-client.ts（原始业务接口及音乐／喜欢／大厅／历史 Query hooks），不再额外包装 get／post／delete。普通业务 JSON 和网易云上游调用均使用独立 Axios 实例；Better Auth 使用官方客户端，AI 使用 useCompletion 消费 SDK 原生数据流，音频播放使用 Audio，媒体流代理保留原生 fetch。浏览器请求支持取消，网易云 JSON 上游维持 15 秒总期限。
+浏览器请求分为 src/lib/http.ts（Axios 实例、/api 前缀和响应拦截器）与各业务目录下的 src/features/<模块>/api.ts（原始业务接口及 Query hooks），不再额外包装 get／post／delete。普通业务 JSON 和网易云上游调用均使用独立 Axios 实例；Better Auth 使用官方客户端，AI 使用 useCompletion 消费 SDK 原生数据流，音频播放使用 Audio，媒体流代理保留原生 fetch。浏览器请求支持取消，网易云 JSON 上游维持 15 秒总期限。
 
 - src/server/auth/：认证核心、HTTP 入口、页面会话校验和 Redis 原子限流；核心供 Web 与 Socket 复用。
 - src/server/db/、drizzle/：认证 schema、连接池与版本化迁移，包含认证四张表、liked_songs、七张房间业务表及 room_summaries；没有内部歌曲 ID 或独立歌曲表。
@@ -64,8 +64,8 @@ Compose 固定官方镜像摘要。拉取受网络限制时通过 .env 的 POSTG
 - /api/auth/\*：Better Auth 原生协议，客户端位于 src/lib/auth-client.ts。
 - src/features/auth/session-provider.tsx：读取真实会话、同步安全投影；换号或失效时清理查询及播放。
 - src/contracts/：统一曲目、安全用户、房间命令和类型化事件；AI 契约位于 ai.ts。
-- src/server/rooms/、socket-server/index.ts：真实房间服务、串行协调、会话检查、轮播和到期清理。Web 音乐查询由独立密钥内部接口提供，Socket 不直连外部曲库。
-- useRoomSession 持有页面作用域 Zustand 投影；useRoomAudio 控制实际音频加载、时间定位、取消与自动播放解锁。快照不进 Query 缓存、不做浏览器持久化。
+- src/server/rooms/、socket-server/index.ts：真实房间服务（按 http-service、playlist-service、playback、service 分层）、串行协调、会话检查、轮播和到期清理。个人房间歌单增删改及导入由 Web HTTP `/api/room-playlist` 直接调用音乐服务，Socket 不访问外部曲库。
+- useRoomSession 持有页面作用域实时投影；useRoomAudio 控制实际音频加载、时间定位、取消与自动播放解锁。快照不进 Query 缓存、不做浏览器持久化。
 - src/features/、src/components/ui/：桌面交互及 shadcn/ui Base UI，业务样式使用 CSS Modules。
 
 账号与会话保存于 PostgreSQL；Redis 保存请求计数和可丢弃音乐资料缓存，不保存登录会话。浏览器不持久化密码或认证 token。喜欢保存于 PostgreSQL，不将播放 URL 或歌词写入收藏；房间与历史保存于 PostgreSQL，在线、上台、投票及定时器在 Socket 进程内存，重启清空并等待重新上台。音量通过 pool:player:volume 独立保存。总结和生成状态保存于 PostgreSQL，并在房间结束满七天级联清理。测试曲目和受控上游仅用于 tests/，应用不依赖本地演示曲库或媒体资源。

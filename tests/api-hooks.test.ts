@@ -19,16 +19,14 @@ vi.mock('@/lib/auth-client', () => ({ authClient: { getSession: vi.fn() } }))
 
 import {
   likesApi,
-  musicApi,
   useLikes,
   useAddLike,
   useRemoveLike,
   useClearLikes,
   useImportLikes,
-  useMusicSearch,
-  roomsApi,
-  useDeleteRoomHistory,
-} from '@/lib/api-client'
+} from '@/features/likes/api'
+import { musicApi, useMusicSearch } from '@/features/music/api'
+import { roomsApi, useDeleteRoomHistory } from '@/features/room/api'
 import { HttpError } from '@/lib/http'
 
 const track: Track = {

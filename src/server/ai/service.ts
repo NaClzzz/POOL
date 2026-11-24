@@ -2,7 +2,14 @@ import { randomUUID } from 'node:crypto'
 import type { RoomSummaryDto } from '@/contracts/ai'
 import { BusinessError } from '../http/errors'
 import { musicService } from '../music/service'
-import { accessSummary, summaryInput, type SummaryAccess, type SummaryRow } from './repository'
+import {
+  readSummary,
+  recoverTimedOutSummary,
+  claimSummary,
+  summaryInput,
+  type SummaryAccess,
+  type SummaryRow,
+} from './repository'
 import { sampleLyrics, summaryPrompt } from './prompts'
 
 /** 资格最长保留两分钟，进程意外结束后可由查询或下次生成恢复。 */
@@ -38,21 +45,23 @@ function summaryDto(roomId: string, expiresAt: Date, row?: SummaryRow): RoomSumm
   }
 }
 
-/** 查询同一份共享状态，同时恢复超期生成资格。 */
-export function getRoomSummary(userId: string, roomId: string) {
-  return accessSummary(userId, roomId, (access) => {
-    const expiry = assertSummaryAccess(access)
-    const row = recoverSummary(access.summary)
-    return {
-      value: summaryDto(roomId, expiry, row),
-      write: row !== access.summary ? row : undefined,
-    }
-  })
+/** 无锁查询共享状态，仅在发现超期生成时条件恢复。 */
+export async function getRoomSummary(userId: string, roomId: string) {
+  const access = await readSummary(userId, roomId)
+  const expiry = assertSummaryAccess(access)
+  const row = recoverSummary(access.summary)
+  if (row !== access.summary && access.summary)
+    await recoverTimedOutSummary(
+      roomId,
+      access.summary.attemptId,
+      new Date(Date.now() - ATTEMPT_MS),
+    )
+  return summaryDto(roomId, expiry, row)
 }
 
 /** 在数据库锁内认领一次尝试；已有成功结果直接返回且不会触发模型。 */
 export function claimRoomSummary(userId: string, roomId: string) {
-  return accessSummary<string | null>(userId, roomId, (access) => {
+  return claimSummary<string | null>(userId, roomId, (access) => {
     assertSummaryAccess(access)
     const row = recoverSummary(access.summary)
     if (row?.status === 'succeeded') return { value: null }

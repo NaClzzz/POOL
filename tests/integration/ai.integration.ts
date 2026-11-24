@@ -432,7 +432,7 @@ describe('真实 AI SDK、账号、PostgreSQL 与 Redis', { concurrency: false }
     const attempt = await claimRoomSummary(a.id, completedRoom)
     await finishSummary(completedRoom, attempt!, '已完成总结', null)
     const before = requests.length
-    const releases = Array.from({ length: 10 }, (_, i) => acquireAiTask(`fixture:${i}`))
+    const releases = Array.from({ length: 10 }, () => acquireAiTask())
     try {
       const shared = await generateSummaryHandler(req(b), context(completedRoom))
       assert.match(shared.headers.get('Content-Type')!, /text\/event-stream/)

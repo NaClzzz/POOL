@@ -1,15 +1,14 @@
 'use client'
 import { useCompletion } from '@ai-sdk/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { JsonToSseTransformStream, parseJsonEventStream, uiMessageChunkSchema } from 'ai'
-import { createRef, useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { z } from 'zod'
 import type { ApiSuccess } from '@/contracts/domain'
 import type { RoomSummaryDto } from '@/contracts/ai'
 import { useSession } from '@/stores/session'
-import { authClient } from '../auth-client'
-import { http, HttpError } from '../http'
-import { notifyError, notifySuccess } from '../notifications'
+import { authClient } from '@/lib/auth-client'
+import { http, HttpError } from '@/lib/http'
+import { notifyError, notifySuccess } from '@/lib/notifications'
 
 /** 持久总结状态使用普通 Axios；模型生成流走 AI SDK 的独立传输。 */
 export const aiApi = {
@@ -22,7 +21,7 @@ export const aiApi = {
   },
 }
 
-/** 查询共享总结，生成期间轮询持久状态。 */
+/** 查询共享总结；仅在非本机接收 SSE 且服务端生成中时轮询持久状态。 */
 export function useRoomSummary(roomId: string, receiving = false) {
   const userId = useSession((s) => s.user?.id)
   return useQuery({
@@ -30,7 +29,7 @@ export function useRoomSummary(roomId: string, receiving = false) {
     queryFn: ({ signal }) => aiApi.summary(roomId, signal),
     enabled: !!userId,
     refetchInterval: (query) =>
-      receiving || query.state.data?.status === 'generating' ? 2000 : false,
+      !receiving && query.state.data?.status === 'generating' ? 2000 : false,
     retry: false,
   })
 }
@@ -41,7 +40,8 @@ const streamFailureSchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }),
   requestId: z.string(),
 })
-/** useCompletion 的请求只发送触发动作；JSON 校验后，数据流仍由 SDK 解析。 */
+
+/** useCompletion 只发送触发动作；校验非 2xx JSON 业务错误，SSE 原样交给 SDK 解析。 */
 const completionFetch: typeof fetch = async (input, init) => {
   let response: Response
   try {
@@ -75,42 +75,7 @@ const completionFetch: typeof fetch = async (input, init) => {
   )
 }
 
-/** SDK 解析和编码原生事件，只补充正常结束检查；正文仍交给 useCompletion 管理。 */
-const checkedCompletionFetch: typeof fetch = async (input, init) => {
-  const response = await completionFetch(input, init)
-  let finishReason: string | undefined
-  let failed = false
-  const stream = parseJsonEventStream({
-    stream: response.body!,
-    schema: uiMessageChunkSchema,
-  })
-    .pipeThrough(
-      new TransformStream({
-        transform(part, controller) {
-          if (!part.success) throw part.error
-          if (part.value.type === 'finish') finishReason = part.value.finishReason
-          if (part.value.type === 'error') failed = true
-          controller.enqueue(part.value)
-        },
-        flush() {
-          if (!failed && finishReason !== 'stop')
-            throw new HttpError(
-              finishReason === 'length' ? 'AI_OUTPUT_TRUNCATED' : 'AI_INCOMPLETE',
-              finishReason === 'length'
-                ? '生成内容达到输出上限，未完成，请手动重试'
-                : '生成未完整结束，请手动重试',
-              502,
-              null,
-            )
-        },
-      }),
-    )
-    .pipeThrough(new JsonToSseTransformStream())
-    .pipeThrough(new TextEncoderStream())
-  return new Response(stream, response)
-}
-
-/** SDK 管理房间总结流；离页仅停止接收，结束后刷新发起账号与房间的持久状态。 */
+/** SDK 管理房间总结流；结束后以数据库持久状态确认结果，离页仅停止接收。 */
 export function useRoomSummaryGeneration(roomId: string) {
   const client = useQueryClient()
   const userId = useSession((s) => s.user?.id)
@@ -118,19 +83,19 @@ export function useRoomSummaryGeneration(roomId: string) {
   const instanceId = useId()
   const id = `${userId}:${api}:${instanceId}`
   const requestId = useRef(0)
-  // useCompletion 的 error 属于组件状态，只在发起它的账号下展示。
   const [requestedId, setRequestedId] = useState<string>()
-  // 与当前 render 的 complete 绑定，旧请求的错误不会污染新请求。
-  const streamError = createRef<Error>()
+  const streamError = useRef<Error | null>(null)
   const { completion, isLoading, error, complete, stop, setCompletion } = useCompletion({
     id,
     api,
     streamProtocol: 'data',
-    fetch: checkedCompletionFetch,
+    throttle: 50,
+    fetch: completionFetch,
     onError: (failure) => {
       streamError.current = failure
     },
   })
+
   useEffect(
     () => () => {
       requestId.current++
@@ -140,19 +105,46 @@ export function useRoomSummaryGeneration(roomId: string) {
     [id, stop, setCompletion],
   )
 
-  /** 通过原生结束检查后才通知成功；失效请求不通知，结束后仍刷新原房间状态。 */
+  /** 流结束后刷新持久状态；由数据库最终状态决定成功、失败或交回轮询。 */
   const generate = () => {
     if (isLoading) return
     const currentRequest = ++requestId.current
+    streamError.current = null
     setRequestedId(id)
-    void complete('')
-      .then((text) => {
-        if (requestId.current !== currentRequest) return
-        if (streamError.current) notifyError(streamError.current)
-        else if (text?.trim()) notifySuccess('房间总结已生成')
-      })
-      .finally(() => client.invalidateQueries({ queryKey: ['room-summary', userId, roomId] }))
+    void complete('').then(async (text) => {
+      const queryKey = ['room-summary', userId, roomId] as const
+      if (requestId.current !== currentRequest) {
+        void client.invalidateQueries({ queryKey })
+        return
+      }
+      const saved = await client
+        .fetchQuery({
+          queryKey,
+          queryFn: ({ signal }) => aiApi.summary(roomId, signal),
+          staleTime: 0,
+        })
+        .catch(() => {
+          void client.invalidateQueries({ queryKey })
+          return null
+        })
+      if (requestId.current !== currentRequest) return
+      if (saved?.status === 'succeeded') {
+        if (text?.trim()) notifySuccess('房间总结已生成')
+      } else if (streamError.current) {
+        notifyError(streamError.current)
+      } else if (saved?.status === 'failed') {
+        notifyError(
+          new HttpError(
+            saved.errorCode ?? 'AI_INCOMPLETE',
+            '生成未完整结束，请手动重试',
+            502,
+            null,
+          ),
+        )
+      }
+    })
   }
+
   return {
     text: completion,
     pending: isLoading,

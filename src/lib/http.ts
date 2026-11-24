@@ -23,6 +23,11 @@ const resultSchema = z.discriminatedUnion('ok', [
   }),
 ])
 
+/** 页面仅在需要额外界面联动时传入成功回调。 */
+export type MutationSuccessOptions<TData, TVariables = void> = {
+  onSuccess?: (data: TData, variables: TVariables) => void | Promise<void>
+}
+
 /** 页面据此判断业务错误和限流等待时间，请求层不负责显示提示。 */
 export class HttpError extends Error {
   constructor(
@@ -59,7 +64,6 @@ http.interceptors.response.use(
     }
     return response
   },
-  /** 只有传输失败进入此分支，主动取消不作为网络失败展示。 */
   (error: unknown) => {
     if (axios.isCancel(error)) throw new DOMException('请求已取消', 'AbortError')
     const invalid = axios.isAxiosError(error) && error.code === 'ERR_BAD_RESPONSE'

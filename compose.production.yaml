@@ -7,7 +7,6 @@ x-server-env: &server-env
   REDIS_URL: ${REDIS_URL:?请配置容器内 REDIS_URL}
   BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?请配置 BETTER_AUTH_SECRET}
   BETTER_AUTH_URL: ${BETTER_AUTH_URL:?请配置公网 HTTPS 地址}
-  ROOM_INTERNAL_SECRET: ${ROOM_INTERNAL_SECRET:?请配置 ROOM_INTERNAL_SECRET}
 
 services:
   web:
@@ -61,12 +60,9 @@ services:
       <<: *server-env
       SOCKET_HOST: 0.0.0.0
       SOCKET_PORT: '3002'
-      ROOM_WEB_URL: http://web:3000
     ports:
       - '127.0.0.1:${SOCKET_PORT:-3002}:3002'
     depends_on:
-      web:
-        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:

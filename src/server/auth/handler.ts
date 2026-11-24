@@ -2,7 +2,7 @@ import { auth } from './core'
 import { readServerEnv } from '../env'
 import { AuthLimiterUnavailable } from './rate-limit'
 
-/** 只暴露当前账号阶段支持的 Better Auth 原生端点。 */
+/** 白名单 */
 const enabledPaths = new Set([
   '/sign-up/email',
   '/sign-in/email',
@@ -12,7 +12,7 @@ const enabledPaths = new Set([
   '/change-password',
 ])
 
-/** 标准认证处理器保留库协议，可信代理头在入口归一化，限流故障关闭写操作。 */
+/** 处理 */
 export async function handleAuthRequest(request: Request) {
   const path = new URL(request.url).pathname.replace(/^\/api\/auth/, '')
   if (!enabledPaths.has(path))

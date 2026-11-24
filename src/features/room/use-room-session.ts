@@ -1,14 +1,17 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createStore } from 'zustand/vanilla'
-import { useStore } from 'zustand'
 import { useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { createRoomSocket, sendRoomCommand, RoomCommandError } from '@/lib/socket-client'
 import { useSession } from '@/stores/session'
 import { usePlayer } from '@/stores/player'
 import { notifyError, notifySuccess } from '@/lib/notifications'
-import type { RoomCommands, RoomSnapshot, ServerRoomEvents } from '@/contracts/room'
+import type {
+  RoomCommands,
+  RoomPlaylistItem,
+  RoomSnapshot,
+  ServerRoomEvents,
+} from '@/contracts/room'
 
 /** 页面作用域实时状态，不持久化且不进入 Query 缓存。 */
 type SessionState = {
@@ -18,33 +21,27 @@ type SessionState = {
   clockOffset: number
 }
 
-/** 有独立操作结果的命令文案；聊天、同步和自动媒体报告不弹成功通知。 */
+/** 有独立操作结果的 Socket 命令文案；聊天、同步和自动媒体报告不弹成功通知。 */
 const commandSuccess: Partial<Record<keyof RoomCommands, string>> = {
   'room:stage:join': '已上台',
   'room:stage:leave': '上台成员已更新',
-  'room:playlist:add': '已加入房间歌单',
-  'room:playlist:remove': '已移除歌曲',
-  'room:playlist:reorder': '歌单顺序已更新',
-  'room:playlist:shuffle': '歌单已打乱',
-  'room:playlist:clear': '房间歌单已清空',
   'room:playback:skip': '已切歌',
   'room:playback:vote-skip': '已投票切歌',
   'room:update-settings': '房间设置已保存',
   'room:kick-member': '已移出成员',
 }
 
+const initialState: SessionState = {
+  snapshot: null,
+  connection: 'joining',
+  error: null,
+  clockOffset: 0,
+}
+
 /** 房间连接生命周期、广播投影和命令错误集中于单个 hook。 */
 export function useRoomSession(code: string) {
-  const [store] = useState(() =>
-    createStore<SessionState>(() => ({
-      snapshot: null,
-      connection: 'joining',
-      error: null,
-      clockOffset: 0,
-    })),
-  )
-
-  const state = useStore(store)
+  const [state, setState] = useState<SessionState>(initialState)
+  const snapshotRef = useRef<RoomSnapshot | null>(null)
   const socketRef = useRef<ReturnType<typeof createRoomSocket> | null>(null)
   const passwordRef = useRef('')
   const switchConfirmed = useRef(false)
@@ -56,23 +53,33 @@ export function useRoomSession(code: string) {
   const applySnapshot = useCallback(
     (snapshot: RoomSnapshot, offset?: number, freshJoin = false) => {
       if (snapshot.room.roomCode !== code) return
-      const old = store.getState().snapshot
+      const old = snapshotRef.current
       if (
         !freshJoin &&
         old &&
         (old.playback.version > snapshot.playback.version || old.revision > snapshot.revision)
       )
         return
-      store.setState({
+      snapshotRef.current = snapshot
+      setState((prev) => ({
         snapshot,
         connection: 'joined',
         error: null,
-        ...(offset === undefined ? {} : { clockOffset: offset }),
-      })
+        clockOffset: offset === undefined ? prev.clockOffset : offset,
+      }))
       usePlayer.getState().setRoom(true)
     },
-    [code, store],
+    [code],
   )
+
+  /** HTTP 歌单写操作完成后立即更新本地快照，并通知 Socket 广播和唤醒轮播。 */
+  const updatePlaylist = useCallback((items: RoomPlaylistItem[]) => {
+    const current = snapshotRef.current
+    if (!current) return
+    const next = { ...current, myPlaylist: items }
+    snapshotRef.current = next
+    setState((prev) => (prev.snapshot ? { ...prev, snapshot: next } : prev))
+  }, [])
 
   /** 确认超时只同步状态；加入恢复额外校准时间并刷新历史，不重放原命令。 */
   const syncRoom = useCallback(
@@ -102,13 +109,13 @@ export function useRoomSession(code: string) {
       if (!socket?.connected) return
       passwordRef.current = password
       if (switching) switchConfirmed.current = true
-      store.setState({
+      setState((prev) => ({
+        ...prev,
         error: null,
-        connection: store.getState().snapshot ? 'reconnecting' : 'joining',
-      })
+        connection: snapshotRef.current ? 'reconnecting' : 'joining',
+      }))
       const sent = Date.now()
       try {
-        // 发送 join 请求
         const result = await sendRoomCommand(
           socket,
           switchConfirmed.current ? 'room:switch' : 'room:join',
@@ -125,62 +132,58 @@ export function useRoomSession(code: string) {
         void client.invalidateQueries({ queryKey: ['room-history', userId] })
       } catch (error) {
         if (socketRef.current !== socket) return
-        store.setState({ error: error as Error })
+        setState((prev) => ({ ...prev, error: error as Error }))
         if (error instanceof RoomCommandError && error.code === 'ACK_TIMEOUT' && socket.connected) {
           void syncRoom(socket, true)
         }
       }
     },
-    [applySnapshot, client, code, store, syncRoom, userId],
+    [applySnapshot, client, code, syncRoom, userId],
   )
 
   useEffect(() => {
     if (!userId) return
-    // 建立连接，得到 Socket 实例
     const socket = createRoomSocket()
     socketRef.current = socket
 
-    // 注册 socket 事件函数
     /** 建连后重新加入，复用已确认的密码和切房意图。 */
     const handleConnect = () => void join(passwordRef.current)
     /** 暂时断线保留快照，停止房间音频并等待当前页面内重连。 */
     const handleDisconnect = () => {
-      store.setState({ connection: 'reconnecting' })
+      setState((prev) => ({ ...prev, connection: 'reconnecting' }))
       usePlayer.getState().setRoom(false)
     }
     /** 连接错误沿用会话错误展示。 */
-    const handleConnectError = (error: Error) => store.setState({ error })
+    const handleConnectError = (error: Error) => setState((prev) => ({ ...prev, error }))
     /** 公共状态只能合并进已有完整快照，保留本人歌单和独立维护的聊天。 */
     const handleRoomState: ServerRoomEvents['room:state'] = (incoming) => {
-      const current = store.getState().snapshot
+      const current = snapshotRef.current
       if (!current) return
       applySnapshot({ ...current, ...incoming })
     }
     /** 消息按房间身份接收并以消息 ID 去重，只保留最近两百条。 */
     const handleMessage: ServerRoomEvents['room:message'] = (message) => {
-      const current = store.getState().snapshot
+      const current = snapshotRef.current
       if (
         !current ||
         message.roomId !== current.room.roomId ||
         current.messages.some((m) => m.id === message.id)
       )
         return
-      store.setState({
-        snapshot: { ...current, messages: [...current.messages, message].slice(-200) },
-      })
+      const next = { ...current, messages: [...current.messages, message].slice(-200) }
+      snapshotRef.current = next
+      setState((prev) => (prev.snapshot ? { ...prev, snapshot: next } : prev))
     }
     /** 私有歌单事件独立更新，不覆盖房间公共状态和消息。 */
-    const handlePlaylist: ServerRoomEvents['user:room-playlist'] = (items) => {
-      const current = store.getState().snapshot
-      if (current) store.setState({ snapshot: { ...current, myPlaylist: items } })
-    }
+    const handlePlaylist: ServerRoomEvents['user:room-playlist'] = (items) => updatePlaylist(items)
     /** 当前房间强退时清理凭据、停止播放并返回大厅。 */
     const handleForcedLeave: ServerRoomEvents['room:forced-leave'] = (payload) => {
       if (payload.roomCode && payload.roomCode !== code) return
       socket.disconnect()
       passwordRef.current = ''
       switchConfirmed.current = false
-      store.setState({ snapshot: null })
+      snapshotRef.current = null
+      setState((prev) => ({ ...prev, snapshot: null }))
       usePlayer.getState().setRoom(false)
       void client.invalidateQueries({ queryKey: ['room-history', userId] })
       if (payload.reason === 'dissolved') notifySuccess('房间已结束')
@@ -208,12 +211,13 @@ export function useRoomSession(code: string) {
       socket.disconnect()
       passwordRef.current = ''
       switchConfirmed.current = false
-      store.setState({ snapshot: null, error: null, connection: 'joining' })
+      snapshotRef.current = null
+      setState(initialState)
       usePlayer.getState().setRoom(false)
       void client.invalidateQueries({ queryKey: ['rooms', userId] })
       void client.invalidateQueries({ queryKey: ['room-history', userId] })
     }
-  }, [applySnapshot, client, code, join, router, store, userId])
+  }, [applySnapshot, client, code, join, router, updatePlaylist, userId])
 
   /** 失败时保留表单草稿；确认超时只查询状态，不重发写操作。 */
   const command = useCallback(
@@ -228,12 +232,7 @@ export function useRoomSession(code: string) {
         const result = await sendRoomCommand(socket, eventName, payload)
         if (socketRef.current !== socket) return false
         if (result.snapshot) applySnapshot(result.snapshot)
-        if (result.imported)
-          notifySuccess(
-            `已加入 ${result.imported.added} 首歌曲`,
-            `重复 ${result.imported.duplicates} 首 · 不支持或无时长 ${result.imported.failed} 首 · 容量不足 ${result.imported.capacitySkipped} 首`,
-          )
-        else if (commandSuccess[eventName]) notifySuccess(commandSuccess[eventName])
+        if (commandSuccess[eventName]) notifySuccess(commandSuccess[eventName])
         return true
       } catch (error) {
         if (socketRef.current !== socket) return false
@@ -247,6 +246,7 @@ export function useRoomSession(code: string) {
         }
         if (
           eventName !== 'room:playback:media-error' &&
+          eventName !== 'room:playlist:sync' &&
           !(error instanceof RoomCommandError && error.code === 'NOT_CONNECTED')
         )
           notifyError(error as Error)
@@ -258,5 +258,12 @@ export function useRoomSession(code: string) {
     },
     [applySnapshot, syncRoom],
   )
-  return { ...state, command, join, leave: () => router.push('/rooms') }
+
+  return {
+    ...state,
+    command,
+    join,
+    updatePlaylist,
+    leave: () => router.push('/rooms'),
+  }
 }

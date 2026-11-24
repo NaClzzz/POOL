@@ -15,7 +15,16 @@ import type {
   RoomCommandResult,
 } from '@/contracts/room'
 
-/** Socket 监听配置；内部音乐服务配置由 RoomService 管理。 */
+/** 入房与房主管理命令复查实时会话；聊天/轮播等高频命令复用建连会话与定时复查。 */
+const SESSION_SENSITIVE_COMMANDS = new Set<keyof RoomCommands>([
+  'room:join',
+  'room:switch',
+  'room:update-settings',
+  'room:kick-member',
+  'room:dissolve',
+])
+
+/** Socket 监听配置。 */
 export function roomServerConfig() {
   return z
     .object({
@@ -26,11 +35,11 @@ export function roomServerConfig() {
 }
 
 /** 创建可测试的 Socket 服务，不在模块导入时监听端口。 */
-// 服务端创建
-export async function createRoomSocketServer() {
-  const env = readServerEnv(),
-    config = roomServerConfig(),
-    origin = new URL(env.BETTER_AUTH_URL).origin
+export async function createRoomSocketServer(options: { sessionCheckIntervalMs?: number } = {}) {
+  const env = readServerEnv()
+  const config = roomServerConfig()
+  const origin = new URL(env.BETTER_AUTH_URL).origin
+  const sessionCheckIntervalMs = options.sessionCheckIntervalMs ?? 60_000
   const httpServer = createServer((req, res) => {
     res.writeHead(req.url === '/health' ? 200 : 404, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ ok: req.url === '/health' }))
@@ -63,10 +72,9 @@ export async function createRoomSocketServer() {
       }
   }
 
-  // 创建业务服务端，并注入广播回调函数
   const service = new RoomService(sendRoomNotice)
 
-  // 鉴权中间件
+  /** 建连握手校验 Better Auth 会话，拒绝未登录连接。 */
   io.use(async (socket, next) => {
     try {
       const session = await auth.api.getSession({
@@ -84,12 +92,12 @@ export async function createRoomSocketServer() {
     }
   })
 
-  // 为每个连接定义处理逻辑
   io.on('connection', (socket) => {
     void socket.join(`user:${socket.data.user.id}`)
     let closed = false
     let checking = false
-    // 会话校验
+
+    /** 复查 Better Auth 会话，失效时立即强制断开连接。 */
     const checkSession = async () => {
       const session = await auth.api.getSession({
         headers: fromNodeHeaders(socket.request.headers),
@@ -100,8 +108,15 @@ export async function createRoomSocketServer() {
         socket.disconnect(true)
         throw new BusinessError('UNAUTHENTICATED', '账号会话已失效', 401)
       }
-      return { id: session.user.id, name: session.user.name, image: session.user.image }
+      const user: RoomUser = {
+        id: session.user.id,
+        name: session.user.name,
+        image: session.user.image,
+      }
+      socket.data.user = user
+      return user
     }
+
     const interval = setInterval(() => {
       if (checking) return
       checking = true
@@ -110,10 +125,10 @@ export async function createRoomSocketServer() {
         .finally(() => {
           checking = false
         })
-    }, 60_000)
+    }, sessionCheckIntervalMs)
 
     for (const command of Object.keys(commandSchemas) as (keyof RoomCommands)[]) {
-      /** 动态注册仍使用共享事件参数类型；参数只在此入口进行 Zod 校验。 */
+      /** 动态注册共享事件参数类型；参数只在此入口进行 Zod 校验。 */
       const handle = async (
         payload: unknown,
         ack: (result: RoomAck<RoomCommandResult>) => void,
@@ -121,17 +136,18 @@ export async function createRoomSocketServer() {
         if (typeof ack !== 'function') return
         const requestId = randomRequestId()
         try {
-          const user = await checkSession()
+          const user = SESSION_SENSITIVE_COMMANDS.has(command)
+            ? await checkSession()
+            : socket.data.user
           const parsed = commandSchemas[command].parse(payload)
           if (closed) return
-          // 调用服务端执行函数
           const data = await service.execute(
             socket.id,
             user,
             command,
             parsed as RoomCommands[typeof command],
           )
-          // disconnect 可能发生在曲库查询或数据库等待中，晚完成的 join 必须撤销。
+          // disconnect 可能发生在数据库等待中，晚完成的 join 必须撤销。
           if (closed) {
             await service.disconnect(socket.id)
             return
@@ -190,6 +206,7 @@ export async function createRoomSocketServer() {
     },
   }
 }
+
 /** 每条命令独立关联日志，不记录 Cookie 或载荷。 */
 function randomRequestId() {
   return crypto.randomUUID()

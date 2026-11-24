@@ -152,7 +152,10 @@ export function RoomPage({ code }: { code: string }) {
           snapshot={snapshot}
           connected={connection === 'joined'}
           open={queueOpen}
-          command={command}
+          onPlaylistUpdated={(items) => {
+            session.updatePlaylist(items)
+            void command('room:playlist:sync', {})
+          }}
         />
       </div>
     </Sheet>

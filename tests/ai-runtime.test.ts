@@ -10,12 +10,14 @@ afterEach(() => {
 })
 
 describe('AI 并发与故障边界', () => {
-  it('全站十个名额，重复任务拒绝，释放后可继续使用', () => {
-    for (let i = 0; i < 10; i++) releases.push(acquireAiTask(`room-${i}`))
-    expect(() => acquireAiTask('room-0')).toThrow('已有生成任务')
-    expect(() => acquireAiTask('room')).toThrow('当前生成任务较多')
-    releases.pop()!()
-    releases.push(acquireAiTask('room'))
+  it('全站十个名额，满额拒绝，重复释放幂等且释放后可继续使用', () => {
+    for (let i = 0; i < 10; i++) releases.push(acquireAiTask())
+    expect(() => acquireAiTask()).toThrow('当前生成任务较多')
+    const release = releases.pop()!
+    release()
+    release()
+    releases.push(acquireAiTask())
+    expect(() => acquireAiTask()).toThrow('当前生成任务较多')
   })
   it('用户额度隔离，拒绝时返回等待秒数', async () => {
     evalQuota.mockResolvedValue([1, 0])

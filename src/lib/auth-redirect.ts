@@ -1,4 +1,4 @@
-/** 登录回跳只接受站内绝对路径，拒绝协议相对地址和浏览器会归一化的反斜杠。 */
+/** 登录回跳 */
 export function authReturnTo(target: string | null) {
   if (
     !target ||

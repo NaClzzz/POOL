@@ -254,16 +254,14 @@ describe('房间会话生命周期', () => {
     await act(async () => sockets[0].fire('room:state', { ...publicState, revision: 100 }))
     mocks.send.mockRejectedValueOnce(new RoomCommandError('ACK_TIMEOUT', '确认超时'))
     mocks.send.mockResolvedValueOnce({ snapshot: { ...snapshot, serverTime: 1 } })
-    await act(async () => current.command('room:playlist:clear', {}))
+    await act(async () => current.command('room:stage:join', {}))
     expect(current.snapshot?.revision).toBe(100)
     expect(current.clockOffset).toBe(originalOffset)
     expect(mocks.notifyError).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ message: '确认超时' }),
     )
     expect(invalidate).not.toHaveBeenCalled()
-    expect(mocks.send.mock.calls.filter((call) => call[1] === 'room:playlist:clear')).toHaveLength(
-      1,
-    )
+    expect(mocks.send.mock.calls.filter((call) => call[1] === 'room:stage:join')).toHaveLength(1)
     expect(mocks.send.mock.calls.filter((call) => call[1] === 'room:sync')).toHaveLength(1)
   })
   it.each(['join', 'command'] as const)(
@@ -417,22 +415,18 @@ describe('房间会话生命周期', () => {
       expect.objectContaining({ message: '你已被移出房间' }),
     )
   })
-  it('命令结果通知一次，聊天和同步成功保持静默，导入保留统计', async () => {
+  it('命令结果通知一次，聊天、同步和歌单同步保持静默，本地歌单更新立即生效', async () => {
     await mount()
-    await act(async () => current.command('room:playlist:clear', {}))
-    expect(mocks.notifySuccess).toHaveBeenCalledExactlyOnceWith('房间歌单已清空')
+    await act(async () => current.command('room:stage:join', {}))
+    expect(mocks.notifySuccess).toHaveBeenCalledExactlyOnceWith('已上台')
     mocks.notifySuccess.mockClear()
     await act(async () => current.command('room:chat:send', { content: 'hello' }))
     await act(async () => current.command('room:sync', {}))
+    await act(async () => current.command('room:playlist:sync', {}))
     expect(mocks.notifySuccess).not.toHaveBeenCalled()
-    mocks.send.mockResolvedValueOnce({
-      imported: { added: 2, duplicates: 3, failed: 4, capacitySkipped: 5 },
-    })
-    await act(async () => current.command('room:playlist:import-liked', {}))
-    expect(mocks.notifySuccess).toHaveBeenCalledExactlyOnceWith(
-      '已加入 2 首歌曲',
-      '重复 3 首 · 不支持或无时长 4 首 · 容量不足 5 首',
-    )
+    const items = [{ itemId: 'local-1', position: 0, track: catalog[0] }]
+    await act(async () => current.updatePlaylist(items))
+    expect(current.snapshot?.myPlaylist).toEqual(items)
   })
   it('换号后旧命令失败不弹通知，断线错误保留连接状态', async () => {
     await mount()
@@ -443,7 +437,7 @@ describe('房间会话生命周期', () => {
           fail = reject
         }),
     )
-    const pending = current.command('room:playlist:clear', {})
+    const pending = current.command('room:stage:join', {})
     mocks.userId = 'b'
     await mount()
     await act(async () => {
@@ -452,7 +446,7 @@ describe('房间会话生命周期', () => {
     })
     expect(mocks.notifyError).not.toHaveBeenCalled()
     mocks.send.mockRejectedValueOnce(new RoomCommandError('NOT_CONNECTED', '连接已断开'))
-    await act(async () => current.command('room:playlist:clear', {}))
+    await act(async () => current.command('room:stage:join', {}))
     expect(mocks.notifyError).not.toHaveBeenCalled()
   })
   it('房间设置的服务端校验错误交回表单，不重复弹通知', async () => {

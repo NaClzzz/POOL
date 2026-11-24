@@ -2,7 +2,7 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import type { ApiSuccess, Track, MusicSource } from '@/contracts/domain'
 import type { Page, PlaybackResource, Lyrics } from '@/contracts/music'
 import { useSession } from '@/stores/session'
-import { http } from '../http'
+import { http } from '@/lib/http'
 
 /** 音乐接口 */
 export const musicApi = {
@@ -53,6 +53,7 @@ export function useMusicSearch(source: MusicSource, keyword: string) {
     enabled: !!userId && !!q,
   })
 }
+
 /** 歌词搜索 */
 export function useLyrics(track: Track | null) {
   return useQuery({

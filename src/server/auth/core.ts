@@ -13,7 +13,7 @@ const env = readServerEnv()
 /** 昵称只在注册／修改资料的认证入口校验，业务模块不重复清洗。 */
 const nameSchema = z.string().trim().min(1).max(30)
 
-/** 独立于 Next 请求上下文的认证核心，可供 HTTP 及后续 Socket 握手复用。 */
+/** Better Auth 实例与配置 */
 export const auth = betterAuth({
   appName: 'POOL',
   baseURL: env.BETTER_AUTH_URL,

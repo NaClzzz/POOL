@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { usePlayer } from '@/stores/player'
 import { catalog } from './fixtures/tracks'
 
-vi.mock('@/lib/api-client', () => ({
+vi.mock('@/features/likes/api', () => ({
   useLikes: () => ({ data: [] }),
   useAddLike: () => ({ isPending: false }),
   useRemoveLike: () => ({ isPending: false }),

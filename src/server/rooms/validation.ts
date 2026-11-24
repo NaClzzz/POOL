@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { referenceSchema } from '../music/validation'
 
 /** HTTP 创建及 Socket 设置入口共用容量和名称约束。 */
 export const createRoomSchema = z
@@ -15,6 +14,12 @@ export const createRoomSchema = z
 export const settingsSchema = createRoomSchema
   .safeExtend({ passwordAction: z.enum(['keep', 'set', 'remove']) })
   .refine((v) => v.passwordAction !== 'set' || !!v.password, '请输入新密码')
+/** 房间歌单 HTTP 校验：移除与排序均使用服务端生成的 itemId。 */
+export const playlistItemIdSchema = z.object({ itemId: z.string().min(1).max(160) })
+export const playlistReorderSchema = z.object({
+  itemId: z.string().min(1).max(160),
+  toIndex: z.number().int().min(0).max(499),
+})
 const empty = z.object({})
 const join = z.object({
   roomCode: z.string().min(1).max(80),
@@ -28,15 +33,7 @@ export const commandSchemas = {
   'room:leave': empty,
   'room:stage:join': empty,
   'room:stage:leave': z.object({ targetUserId: z.string().min(1).max(160).optional() }),
-  'room:playlist:add': referenceSchema,
-  'room:playlist:remove': z.object({ itemId: z.string().min(1).max(160) }),
-  'room:playlist:reorder': z.object({
-    itemId: z.string().min(1).max(160),
-    toIndex: z.number().int().min(0).max(499),
-  }),
-  'room:playlist:shuffle': empty,
-  'room:playlist:clear': empty,
-  'room:playlist:import-liked': empty,
+  'room:playlist:sync': empty,
   'room:chat:send': z.object({
     content: z
       .string()

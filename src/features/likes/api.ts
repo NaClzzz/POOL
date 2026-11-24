@@ -2,9 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiSuccess, Track, LikedTrack } from '@/contracts/domain'
 import type { Page, ImportLikesResult, ImportPlaylistInput } from '@/contracts/music'
 import { useSession } from '@/stores/session'
-import { http, HttpError } from '../http'
-import { notifyError, notifySuccess } from '../notifications'
-import type { MutationSuccessOptions } from './types'
+import { http, HttpError, type MutationSuccessOptions } from '@/lib/http'
+import { notifyError, notifySuccess } from '@/lib/notifications'
 
 /** 喜欢接口 */
 export const likesApi = {

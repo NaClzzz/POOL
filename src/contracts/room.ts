@@ -94,7 +94,7 @@ export type RoomImportResult = {
 }
 /** Socket 确认使用业务结果及可选重试等待时间，不携带 HTTP 状态。 */
 export type RoomAck<T> = ApiResult<T> & { retryAfter?: number }
-/** 命令名与参数集中定义，客户端和服务端共享。 */
+/** 命令名与参数集中定义，客户端和服务端共享；歌单增删改通过 HTTP 完成。 */
 export type RoomCommands = {
   'room:join': { roomCode: string; password?: string }
   'room:switch': { roomCode: string; password?: string }
@@ -102,12 +102,7 @@ export type RoomCommands = {
   'room:leave': Record<string, never>
   'room:stage:join': Record<string, never>
   'room:stage:leave': { targetUserId?: string }
-  'room:playlist:add': { source: Track['source']; source_id: string; extra?: Track['extra'] }
-  'room:playlist:remove': { itemId: string }
-  'room:playlist:reorder': { itemId: string; toIndex: number }
-  'room:playlist:shuffle': Record<string, never>
-  'room:playlist:clear': Record<string, never>
-  'room:playlist:import-liked': Record<string, never>
+  'room:playlist:sync': Record<string, never>
   'room:chat:send': { content: string }
   'room:playback:skip': Record<string, never>
   'room:playback:vote-skip': Record<string, never>
@@ -116,10 +111,9 @@ export type RoomCommands = {
   'room:kick-member': { targetUserId: string }
   'room:dissolve': Record<string, never>
 }
-/** 所有已加入命令返回快照，导入另带统计；避免维护第二套客户端乐观状态。 */
+/** 所有已加入命令返回快照，避免维护第二套客户端乐观状态。 */
 export type RoomCommandResult = {
   snapshot: RoomSnapshot | null
-  imported?: Omit<RoomImportResult, 'items'>
 }
 /** Socket.IO 双端共享的事件签名。 */
 export type ClientRoomEvents = {

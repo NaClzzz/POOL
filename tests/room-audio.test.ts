@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Playback } from '@/contracts/room'
 
 const { playbackRequest } = vi.hoisted(() => ({ playbackRequest: vi.fn() }))
-vi.mock('@/lib/api-client', () => ({ musicApi: { playback: playbackRequest } }))
+vi.mock('@/features/music/api', () => ({ musicApi: { playback: playbackRequest } }))
 vi.mock('@/stores/player', () => ({
   usePlayer: (selector: (state: { volume: number }) => unknown) => selector({ volume: 0.5 }),
 }))
