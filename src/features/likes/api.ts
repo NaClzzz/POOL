@@ -7,7 +7,7 @@ import { notifyError, notifySuccess } from '@/lib/notifications'
 
 /** 喜欢接口 */
 export const likesApi = {
-  /** 一次读取最多 500 首，保证搜索喜欢态不依赖已加载分页。 */
+  /** 获取喜欢 */
   list: async (signal?: AbortSignal) => {
     const response = await http.get<ApiSuccess<Page<LikedTrack>>>('/likes', {
       params: { offset: 0, limit: 500 },
@@ -15,33 +15,33 @@ export const likesApi = {
     })
     return response.data.data.items
   },
-  /** 新增收藏，由 Axios 自动序列化 JSON 对象。 */
+  /** 新增喜欢 */
   add: async (track: Track) => {
     const response = await http.post<ApiSuccess<{ item: LikedTrack; added: boolean }>>('/likes', {
       track,
     })
     return response.data.data
   },
-  /** 按歌曲身份幂等取消收藏。 */
+  /** 取消喜欢 */
   remove: async (track: Track) => {
     const response = await http.delete<ApiSuccess<null>>('/likes', {
       params: { source: track.source, id: track.source_id },
     })
     return response.data.data
   },
-  /** 清空当前用户的喜欢列表。 */
+  /** 清空喜欢 */
   clear: async () => {
     const response = await http.delete<ApiSuccess<null>>('/likes/clear')
     return response.data.data
   },
-  /** 导入链接交给服务端解析及容量检查。 */
+  /** 歌单链接导入 */
   import: async (input: ImportPlaylistInput) => {
     const response = await http.post<ApiSuccess<ImportLikesResult>>('/likes/import', input)
     return response.data.data
   },
 }
 
-/** 喜欢查询 */
+/** 获取喜欢 */
 export function useLikes({ enabled = true }: { enabled?: boolean } = {}) {
   const userId = useSession((state) => state.user?.id)
   return useQuery({

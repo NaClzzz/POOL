@@ -1,0 +1,51 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy via SSH
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate secrets and deploy via SSH
+        env:
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_PORT: ${{ secrets.ECS_PORT }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+          ECS_SSH_PRIVATE_KEY: ${{ secrets.ECS_SSH_PRIVATE_KEY }}
+          ECS_SSH_KNOWN_HOSTS: ${{ secrets.ECS_SSH_KNOWN_HOSTS }}
+          ECS_DEPLOY_PATH: ${{ secrets.ECS_DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          for name in ECS_HOST ECS_USER ECS_SSH_PRIVATE_KEY ECS_SSH_KNOWN_HOSTS ECS_DEPLOY_PATH; do
+            if [ -z "${!name:-}" ]; then
+              echo "缺少必要的 GitHub Secret: $name" >&2
+              exit 1
+            fi
+          done
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$ECS_SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$ECS_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+          PORT="${ECS_PORT:-22}"
+          trap 'rm -f ~/.ssh/id_deploy ~/.ssh/known_hosts' EXIT
+          ssh -p "$PORT" -i ~/.ssh/id_deploy -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts \
+            "${ECS_USER}@${ECS_HOST}" \
+            "cd $(printf '%q' "$ECS_DEPLOY_PATH") && git pull --ff-only && SKIP_PULL=1 bash ./deploy/deploy.sh"

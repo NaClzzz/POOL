@@ -66,7 +66,7 @@
 - 网易云源码以普通文件保存在 vendor/api-enhanced，依赖与锁文件独立，不修改上游业务逻辑；本地 music:dev 使用该目录，生产使用上游 Dockerfile 独立构建且不发布端口，只由 POOL Web 服务调用；不转发 POOL Cookie。敏感配置只放未提交的 .env，不输出日志或文档。
 - 协议集成测试和媒体生命周期测试不替代多浏览器真实听感验收；AI fixture 测试不替代配置密钥后的百炼真实模型验收。
 
-- Web 生产使用 standalone；Socket 使用编译后的 JavaScript 与追踪运行依赖，不依赖 tsx。数据库迁移通过 tools profile 的 migrate 服务单独执行，不在应用启动时执行。生产配置见 .env.production.example，NEXT_PUBLIC_SOCKET_URL 是构建参数，其余业务密钥仅运行时注入。
+- Web 生产使用 standalone；Socket 与 migrate 使用 esbuild 编译的独立单文件入口搭配容器内 `prod-dependencies`，不依赖 tsx。数据库迁移通过 tools profile 的 migrate 服务单独执行，不在应用启动时执行。生产配置见 .env.production.example，NEXT_PUBLIC_SOCKET_URL 是构建参数，其余业务密钥仅运行时注入。
 
 ## 文档维护与验证
 

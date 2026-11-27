@@ -195,6 +195,7 @@ export function useRoomSession(code: string) {
       router.replace('/rooms')
     }
 
+    //** 集中注册 socket 事件 */
     socket.on('connect', handleConnect)
     socket.on('disconnect', handleDisconnect)
     socket.on('connect_error', handleConnectError)

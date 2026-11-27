@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Format, Lint, Typecheck, Test & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Build Next.js
+        env:
+          DATABASE_URL: postgresql://build:build@127.0.0.1:5432/build
+          REDIS_URL: redis://127.0.0.1:6379
+          BETTER_AUTH_SECRET: build-placeholder-not-a-production-secret
+          BETTER_AUTH_URL: http://localhost:3000
+          NEXT_PUBLIC_SOCKET_URL: ''
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: pnpm build
+
+      - name: Build server bundles
+        run: pnpm build:server

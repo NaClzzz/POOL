@@ -8,6 +8,12 @@ x-server-env: &server-env
   BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?请配置 BETTER_AUTH_SECRET}
   BETTER_AUTH_URL: ${BETTER_AUTH_URL:?请配置公网 HTTPS 地址}
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
 services:
   web:
     image: pool-web:${POOL_IMAGE_TAG:-local}
@@ -45,6 +51,7 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 3
+    logging: *default-logging
     init: true
     stop_grace_period: 100s
     restart: unless-stopped
@@ -65,8 +72,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
     healthcheck:
       test:
         [
@@ -79,6 +84,7 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 3
+    logging: *default-logging
     init: true
     stop_grace_period: 30s
     restart: unless-stopped
@@ -108,6 +114,7 @@ services:
       timeout: 5s
       start_period: 120s
       retries: 5
+    logging: *default-logging
     restart: unless-stopped
 
   postgres:
@@ -123,6 +130,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    logging: *default-logging
     restart: unless-stopped
 
   redis:
@@ -137,6 +145,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    logging: *default-logging
     restart: unless-stopped
 
   migrate:
@@ -152,6 +161,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    logging: *default-logging
     restart: 'no'
 
 volumes:

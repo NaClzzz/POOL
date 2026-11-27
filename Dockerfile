@@ -9,6 +9,10 @@ FROM base AS dependencies
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
+FROM base AS prod-dependencies
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --prod --frozen-lockfile
+
 FROM dependencies AS web-build
 COPY . .
 # 唯一公开构建变量；生产默认空值，使浏览器连接同域 /socket.io/。
@@ -43,11 +47,15 @@ EXPOSE 3000
 CMD ["node", "server.js"]
 
 FROM runtime AS socket
-COPY --from=server-build --chown=node:node /app/dist/socket ./
+COPY --from=prod-dependencies --chown=node:node /app/package.json ./
+COPY --from=prod-dependencies --chown=node:node /app/node_modules ./node_modules
+COPY --from=server-build --chown=node:node /app/dist/socket.mjs ./dist/socket.mjs
 EXPOSE 3002
-CMD ["node", "--conditions=react-server", "dist/entries/socket.mjs"]
+CMD ["node", "--conditions=react-server", "dist/socket.mjs"]
 
 FROM runtime AS migrate
-COPY --from=server-build --chown=node:node /app/dist/migrate ./
+COPY --from=prod-dependencies --chown=node:node /app/package.json ./
+COPY --from=prod-dependencies --chown=node:node /app/node_modules ./node_modules
+COPY --from=server-build --chown=node:node /app/dist/migrate.mjs ./dist/migrate.mjs
 COPY --chown=node:node drizzle ./drizzle
-CMD ["node", "dist/entries/migrate.mjs"]
+CMD ["node", "dist/migrate.mjs"]

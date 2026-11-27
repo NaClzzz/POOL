@@ -254,7 +254,7 @@ describe('统一业务 Query hooks', () => {
     await settled
     expect(notifications.notifyError).not.toHaveBeenCalled()
   })
-  it('删除历史清除本人详情与总结缓存，通知一次后执行页面回调', async () => {
+  it('删除历史清除本人详情与总结缓存后执行页面回调', async () => {
     client.setQueryData(['room-history-detail', 'user-a', 'room'], {})
     client.setQueryData(['room-summary', 'user-a', 'room'], {})
     vi.spyOn(roomsApi, 'deleteHistory').mockResolvedValue(null)
@@ -262,7 +262,7 @@ describe('统一业务 Query hooks', () => {
     await renderHook(() => useDeleteRoomHistory({ onSuccess: success })).mutateAsync('room')
     expect(client.getQueryData(['room-summary', 'user-a', 'room'])).toBeUndefined()
     expect(client.getQueryData(['room-history-detail', 'user-a', 'room'])).toBeUndefined()
-    expect(notifications.notifySuccess).toHaveBeenCalledExactlyOnceWith('已删除这条房间历史')
+    expect(notifications.notifySuccess).not.toHaveBeenCalled()
     expect(success).toHaveBeenCalledExactlyOnceWith(null, 'room')
   })
 })

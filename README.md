@@ -1,113 +1,111 @@
 # POOL
 
-桌面端一起听音乐项目。账号系统已接入 Better Auth、PostgreSQL 和 Cookie Session，已接通网易云匿名搜索与真实个人播放、PostgreSQL 喜欢及歌单导入；Redis 用于认证／音乐限流和音乐查询缓存。真实一起听与 PostgreSQL 房间历史已接通；共享房间总结通过 Vercel AI SDK 接入百炼。
+桌面端在线一起听音乐全栈平台：支持朋友建房轮流上台带歌、多端时间轴同步听歌、实时聊天，以及房间结束后的 AI 共享回忆总结。
 
-## 本地运行
+## 核心功能
 
-需要 Node.js 24+、pnpm 和可用的 Docker Compose。依赖锁定于 pnpm-lock.yaml。
+- **账号与会话**：基于 Better Auth + PostgreSQL 的邮箱密码注册登录与 Cookie Session，支持资料修改与安全改密。
+- **音乐搜索与喜欢收藏**：通过统一音源适配器接入网易云匿名曲库（搜索、详情、歌词、音频取流），支持个人播放器队列拖拽与最多 500 首喜欢及歌单链接导入。
+- **多人一起听房间**：公开／密码房创建与大厅检索、上台轮播队列、全票／播主切歌、实时聊天（10 秒 5 条限流）及空房定时归档。
+- **多端音频同步**：服务端 4 秒预加载窗口与起播锚点下发，客户端时钟校准、播放版本号防乱序及切后台重对齐。
+- **AI 共享总结**：房间结束后由参与者触发，基于 Vercel AI SDK 流式生成并落库，同房成员共享同一份历史回顾。
+
+## 技术栈
+
+| 领域         | 技术选型                                                                 |
+| ------------ | ------------------------------------------------------------------------ |
+| 前端         | Next.js App Router、React 19、TypeScript、Tailwind CSS、shadcn/ui (Base UI) |
+| 状态与请求   | TanStack Query、Zustand、Axios、TanStack Virtual、dnd-kit、React Hook Form |
+| 后端与实时   | Next.js Route Handlers、独立 Socket.IO 进程、Zod、Better Auth            |
+| 数据与缓存   | PostgreSQL、Drizzle ORM、Redis（Lua 原子限流与查询缓存）                 |
+| AI           | Vercel AI SDK (`ai` / `@ai-sdk/react` / `@ai-sdk/openai-compatible`)、百炼 `qwen3.8-flash` |
+| 测试与部署   | Vitest、Node Test 隔离数据库集成测试、Docker Compose、Nginx、GitHub Actions |
+
+## 架构与目录
+
+```mermaid
+flowchart TD
+    Browser["浏览器（桌面端 & Audio）"] --> Nginx["宿主机 Nginx（HTTPS 同域反代）"]
+    Nginx -->|"页面 / HTTP API / SSE 流"| Web["Next.js Web"]
+    Nginx -->|"/socket.io/ WebSocket"| Socket["Socket.IO 实时服务"]
+    Web --> PG[("PostgreSQL")]
+    Web --> Redis[("Redis（缓存 & 限流）")]
+    Web --> Music["vendor/api-enhanced（网易云 API）"]
+    Web --> AI["百炼模型 API"]
+    Socket --> PG
+```
+
+```text
+POOL/
+├─ src/app/                 # App Router 页面与 HTTP API 路由
+├─ src/contracts/           # 前后端共享 DTO、房间命令与事件契约
+├─ src/features/            # 按业务模块内聚的 UI、API 与 Query hooks
+├─ src/lib/                 # Axios 实例、Socket 客户端、认证客户端与通知
+├─ src/server/              # 认证、音乐适配、收藏、房间分层服务与 AI 链路
+├─ socket-server/           # 独立 Socket.IO 进程入口
+├─ drizzle/                 # 版本化数据库迁移 SQL
+├─ deploy/                  # Nginx 配置模板与一键部署脚本
+├─ tests/                   # 单元测试、React 生命周期测试与集成测试
+└─ vendor/api-enhanced/     # 仓库内网易云上游源码（独立依赖与许可证）
+```
+
+## 工程亮点
+
+- **时间轴同步播放**：采用“服务端起播锚点 + 4 秒预加载 + 客户端 RTT 时钟校准 + 播放版本号”代替高频进度广播，兼容浏览器自动播放限制与切后台重对齐。
+- **并发与锁序控制**：服务端 `KeyedSerial` 按固定键序串行化用户与跨房操作，防止切换房间与断线清理交叉死锁；同用户多标签页合并为单一成员。
+- **上游保护与降级**：音乐模块整合 Redis Lua 原子限流、Singleflight 请求合并与单实例 QPS/并发预算；Redis 异常时普通查询降级内存，高成本 AI 与导入入口安全拒绝。
+- **独立产物与轻量 CI/CD**：Web 使用 Next.js `standalone`，Socket 与迁移脚本通过 `esbuild` 编译为单文件 ESM 产物；GitHub Actions 自动验证并在推送 `main` 后通过 SSH 触发服务器本地构建更新。
+
+## 本地开发
+
+需要 **Node.js 24+**、**pnpm** 与 **Docker Compose**。
+
+1. **安装依赖并准备环境变量**
 
 ```sh
 pnpm install
+pnpm --dir vendor/api-enhanced install --frozen-lockfile --prod --ignore-scripts
+cp .env.example .env
 ```
 
-首次克隆时将 .env.example 复制为 .env，替换数据库密码、Redis 密码及至少 32 字符的随机认证密钥，确保 DATABASE_URL、REDIS_URL 中的密码与容器一致。已有 .env 时保留当前配置。
+修改 `.env` 中的数据库密码、Redis 密码与随机 `BETTER_AUTH_SECRET`（至少 32 字符），确保 `DATABASE_URL`、`REDIS_URL` 中的密码与容器一致；需要联调真实总结时填写 `DASHSCOPE_API_KEY`。
+
+2. **启动 PostgreSQL / Redis 并执行迁移**
 
 ```sh
 pnpm infra:up
 pnpm db:migrate
 ```
 
-网易云源码以普通文件纳入 vendor/api-enhanced，包与锁文件独立。配置 MUSIC_API_BASE_URL=http://127.0.0.1:3001，首次在 POOL 根目录安装音源依赖：
-
-```sh
-pnpm --dir vendor/api-enhanced install --frozen-lockfile --prod --ignore-scripts
-```
-
-回到 POOL，在三个终端分别启动音源、Web、Socket；已运行的服务无需重复启动：
+3. **在三个终端分别启动音源、Web 与 Socket 服务**
 
 ```sh
 pnpm music:dev
-```
-
-```sh
 pnpm dev
-```
-
-```sh
 pnpm socket:dev
 ```
 
-三个应用进程均由用户手动启动。访问 http://localhost:3000，BETTER_AUTH_URL 必须与浏览器站点地址一致。本地 NEXT_PUBLIC_SOCKET_URL=http://localhost:3002，Socket 绑定 127.0.0.1:3002。健康检查 GET http://127.0.0.1:3002/health。浏览器均用 localhost，不混用 127.0.0.1，以便复用 Cookie。基础服务端口仅绑定本机回环地址，数据保存在独立 Docker volume；停止使用 pnpm infra:stop，再次启动使用 pnpm infra:up。
+访问 `http://localhost:3000`（本地统一使用 `localhost` 以复用 Cookie，不混用 `127.0.0.1`）。停止基础设施容器可执行 `pnpm infra:stop`。
 
-Compose 固定官方镜像摘要。拉取受网络限制时通过 .env 的 POSTGRES_IMAGE、REDIS_IMAGE 配置可访问的镜像地址并保持相同摘要，详见 [第二阶段交付](docs/开发阶段/02-基础后端与账号系统.md)。
+## 测试与部署
 
-## 账号与使用路径
-
-1. 在 /register 填写昵称、邮箱和 8～128 位密码，注册成功直接登录。不发送验证邮件，也不提供邮件找回密码。
-2. 在 /settings 查看真实账号、修改昵称和密码。改密需验证当前密码，成功后撤销其他会话；退出撤销当前服务端会话。会话 7 天，持续使用满一天后续期。
-3. 搜索页提交网易云关键词，加载更多、播放和收藏均调用真实接口；Bilibili 当前明确未接入。个人播放按需解析临时 CDN 地址，无法取得完整资源的条目会跳过；当前上游 unblock=true 的匹配语义与目标待对齐，见第四阶段文档。
-4. 喜欢页使用 PostgreSQL 收藏，支持完整网易云歌单链接导入、顺序／随机播放、队列拖拽。新账号的收藏和历史为空。
-5. 大厅从数据库查询和创建房间；公开房可搜索名称／标签，密码房通过完整房间号查询。首次没有预置房间，创建后才通过 Socket 加入，密码错误不会写历史。
-6. 房间歌单双列抽屉左侧使用真实网易云搜索，右侧管理独立持久歌单，可拖拽、导入真实喜欢、打乱和清空；无有效服务端时长歌曲不能加入。上台后按固定顺序轮播，同步播放真实音乐并聊天，当前播放者切歌、其他成员全票切歌。
-7. 房主可改设置、强制下台、踢人和结束房间。同用户同房多标签页共用一名成员，最后连接离开才退房；跨房需确认。离开房间页立即停音并销毁本页连接，个人播放不自动恢复。房间不可暂停、拖动进度，自动播放受限时点击“启用声音”。
-8. 真实历史每用户最多 50 条，删除只撤销本人访问记录。空房三十分钟结束，归档从结束算七天后统一清理。历史详情可生成共享总结，离页后继续并保存，成功后全员共享且不可重新生成。
-9. AI 使用服务端 .env 中的 DASHSCOPE_API_KEY、DASHSCOPE_BASE_URL 和 DASHSCOPE_MODEL。默认配置 qwen3.8-flash；未填密钥返回 AI_NOT_CONFIGURED，不自动换模型。设置页只保留真实账号与音量偏好。
-
-## 数据与服务边界
-
-浏览器请求分为 src/lib/http.ts（Axios 实例、/api 前缀和响应拦截器）与各业务目录下的 src/features/<模块>/api.ts（原始业务接口及 Query hooks），不再额外包装 get／post／delete。普通业务 JSON 和网易云上游调用均使用独立 Axios 实例；Better Auth 使用官方客户端，AI 使用 useCompletion 消费 SDK 原生数据流，音频播放使用 Audio，媒体流代理保留原生 fetch。浏览器请求支持取消，网易云 JSON 上游维持 15 秒总期限。
-
-- src/server/auth/：认证核心、HTTP 入口、页面会话校验和 Redis 原子限流；核心供 Web 与 Socket 复用。
-- src/server/db/、drizzle/：认证 schema、连接池与版本化迁移，包含认证四张表、liked_songs、七张房间业务表及 room_summaries；没有内部歌曲 ID 或独立歌曲表。
-- src/server/music/、src/server/likes/：统一音乐适配、Redis 缓存与限流、收藏事务及导入；当前只接网易云匿名服务。
-- GET /api/account：真实 Cookie 鉴权的当前用户接口，使用普通业务 JSON 响应，不接受客户端指定身份。
-- /api/auth/\*：Better Auth 原生协议，客户端位于 src/lib/auth-client.ts。
-- src/features/auth/session-provider.tsx：读取真实会话、同步安全投影；换号或失效时清理查询及播放。
-- src/contracts/：统一曲目、安全用户、房间命令和类型化事件；AI 契约位于 ai.ts。
-- src/server/rooms/、socket-server/index.ts：真实房间服务（按 http-service、playlist-service、playback、service 分层）、串行协调、会话检查、轮播和到期清理。个人房间歌单增删改及导入由 Web HTTP `/api/room-playlist` 直接调用音乐服务，Socket 不访问外部曲库。
-- useRoomSession 持有页面作用域实时投影；useRoomAudio 控制实际音频加载、时间定位、取消与自动播放解锁。快照不进 Query 缓存、不做浏览器持久化。
-- src/features/、src/components/ui/：桌面交互及 shadcn/ui Base UI，业务样式使用 CSS Modules。
-
-账号与会话保存于 PostgreSQL；Redis 保存请求计数和可丢弃音乐资料缓存，不保存登录会话。浏览器不持久化密码或认证 token。喜欢保存于 PostgreSQL，不将播放 URL 或歌词写入收藏；房间与历史保存于 PostgreSQL，在线、上台、投票及定时器在 Socket 进程内存，重启清空并等待重新上台。音量通过 pool:player:volume 独立保存。总结和生成状态保存于 PostgreSQL，并在房间结束满七天级联清理。测试曲目和受控上游仅用于 tests/，应用不依赖本地演示曲库或媒体资源。
-
-## 迁移与验证
+常用检查与测试命令：
 
 ```sh
-pnpm db:generate
-pnpm db:migrate
 pnpm typecheck
 pnpm lint
-pnpm test
-pnpm test:integration
-pnpm test:rooms
-pnpm test:ai
-pnpm test:music:live
 pnpm format:check
+pnpm test
+pnpm test:integration   # 需先启动 PostgreSQL 与 Redis（使用隔离 schema/命名空间）
 pnpm build
+pnpm build:server
 ```
 
-db:generate 用于 schema 变更后生成 SQL，首次运行只需执行已提交迁移。认证依赖或配置变化需重新生成 schema 时使用 pnpm auth:generate，检查生成结果后再生成和执行迁移。实际密钥与密码只放在未提交的 .env。
+生产环境采用 [compose.production.yaml](compose.production.yaml) 管理 `web`、`socket`、`music`、`postgres`、`redis` 与一次性 `migrate` 容器，宿主机 Nginx 负责 HTTPS 同域分流；服务器更新可直接执行 `bash ./deploy/deploy.sh`，详细步骤与 CI/CD 密钥说明见 [部署指南](docs/部署指南.md)。
 
-Vitest 覆盖请求层、身份边界、个人队列、AI 输入／限额／流协议／取消及期限以及真实 React 房间会话和媒体生命周期。集成测试连接 PostgreSQL／Redis，使用可控音乐上游和真实 Socket.IO 多客户端。房间和 AI 测试在随机隔离数据库 schema 执行已提交迁移，避免启动重置影响开发房间；认证／音乐测试使用随机账号和专用 Redis 命名空间。真实音源测试需 api-enhanced 已运行；AI 集成测试使用可控兼容模型接口，不需要真实模型密钥，不代表百炼实测。测试不启动 POOL Web，不替代多浏览器实际音乐同步与听感验收。
+## 相关文档
 
-生产使用独立 [compose.production.yaml](compose.production.yaml)，分别构建 Web standalone、编译后的 Socket、网易云 API 和一次性迁移工具；PostgreSQL／Redis 不公开端口。完整部署、环境变量、Nginx HTTPS／SSE／WebSocket 与备份恢复步骤见 [部署指南](docs/部署指南.md)。本地 pnpm build:server 生成独立 Socket 产物，pnpm socket:start 读取运行环境变量启动，不再使用 tsx；本地测试产物需自行传入环境变量（例如 node --env-file=.env --conditions=react-server dist/socket/dist/entries/socket.mjs）。
-
-## 文档
-
-- [部署指南](docs/部署指南.md)
-- [第八阶段：源码集成与容器部署](docs/开发阶段/08-源码集成与容器部署.md)
-
-- [第七阶段：AI 房间总结](docs/开发阶段/07-AI房间总结.md)
-
-- [第五阶段：真实一起听与房间页面整理](docs/开发阶段/05-真实一起听与房间页面整理.md)
-
-- [第四阶段：请求层与业务查询整理](docs/开发阶段/04-请求层与业务查询整理.md)
-
-- [第三阶段：网易云音乐与喜欢列表持久化](docs/开发阶段/03-网易云音乐与喜欢列表持久化.md)
-
-- [第二阶段：基础后端与账号系统](docs/开发阶段/02-基础后端与账号系统.md)
-- [前端交互范围](docs/开发阶段/01-前端交互原型.md)
-- [前端交付与服务接入点](docs/开发阶段/01-前端原型完成情况与后端接入准备.md)
-- [项目概览](docs/项目概览.md)
-- [前端设计](docs/前端设计.md)
-- [服务端设计](docs/服务端设计.md)
+- [项目概览](docs/项目概览.md)：总体选型、服务职责边界与业务规则
+- [前端设计](docs/前端设计.md)：页面路由、组件分工、状态管理与交互规范
+- [服务端设计](docs/服务端设计.md)：数据库模型、HTTP / Socket 契约与业务流程
+- [部署指南](docs/部署指南.md)：生产容器、Nginx、备份恢复与轻量 CI/CD

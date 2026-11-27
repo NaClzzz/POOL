@@ -25,7 +25,7 @@
     "test:music": "node --conditions=react-server --env-file=.env --import tsx --test tests/integration/music.integration.ts",
     "test:music:live": "node --conditions=react-server --env-file=.env --import tsx --test tests/integration/music-live.integration.ts",
     "socket:dev": "node --conditions=react-server --env-file=.env --import tsx socket-server/index.ts",
-    "socket:start": "node --conditions=react-server dist/socket/dist/entries/socket.mjs",
+    "socket:start": "node --conditions=react-server dist/socket.mjs",
     "test:rooms": "node --conditions=react-server --env-file=.env --import tsx --test tests/integration/rooms.integration.ts"
   },
   "dependencies": {
@@ -64,7 +64,6 @@
     "@types/pg": "8.23.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "@vercel/nft": "1.11.2",
     "auth": "1.7.18",
     "drizzle-kit": "0.31.11",
     "esbuild": "0.28.2",

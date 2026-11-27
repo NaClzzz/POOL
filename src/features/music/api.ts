@@ -6,7 +6,7 @@ import { http } from '@/lib/http'
 
 /** 音乐接口 */
 export const musicApi = {
-  /** 搜索结果使用统一分页，查询编码及取消交给 Axios。 */
+  /** 搜索音乐 */
   search: async (source: MusicSource, q: string, offset = 0, limit = 30, signal?: AbortSignal) => {
     const response = await http.get<ApiSuccess<Page<Track>>>('/music/search', {
       params: { source, q, offset, limit },
@@ -14,7 +14,7 @@ export const musicApi = {
     })
     return response.data.data
   },
-  /** 按平台身份读取统一曲目详情。 */
+  /** 获取单曲详情 */
   getTrack: async (source: MusicSource, id: string, signal?: AbortSignal) => {
     const response = await http.get<ApiSuccess<Track>>('/music/track', {
       params: { source, id },
@@ -22,7 +22,7 @@ export const musicApi = {
     })
     return response.data.data
   },
-  /** 歌词按需读取，无歌词由服务端以 null 表达。 */
+  /** 获取歌词 */
   lyrics: async (source: MusicSource, id: string, signal?: AbortSignal) => {
     const response = await http.get<ApiSuccess<Lyrics>>('/music/lyrics', {
       params: { source, id },
@@ -30,7 +30,7 @@ export const musicApi = {
     })
     return response.data.data
   },
-  /** 只提交歌曲引用，播放地址不持久化。 */
+  /** 获取播放资源 */
   playback: async (track: Track, signal?: AbortSignal) => {
     const response = await http.post<ApiSuccess<PlaybackResource>>(
       '/music/playback',
@@ -41,7 +41,7 @@ export const musicApi = {
   },
 }
 
-/** 音乐搜索 */
+/** 搜索音乐 */
 export function useMusicSearch(source: MusicSource, keyword: string) {
   const userId = useSession((state) => state.user?.id)
   const q = keyword.trim()
@@ -54,7 +54,7 @@ export function useMusicSearch(source: MusicSource, keyword: string) {
   })
 }
 
-/** 歌词搜索 */
+/** 获取歌词 */
 export function useLyrics(track: Track | null) {
   return useQuery({
     queryKey: ['music', 'lyrics', track?.source, track?.source_id],
