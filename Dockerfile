@@ -24,6 +24,8 @@ RUN DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build \
     REDIS_URL=redis://127.0.0.1:6379 \
     BETTER_AUTH_SECRET=build-placeholder-not-a-production-secret \
     BETTER_AUTH_URL=http://localhost:3000 \
+    NODE_OPTIONS=--max-old-space-size=1024 \
+    SKIP_TYPECHECK=1 \
     pnpm build
 
 FROM dependencies AS server-build

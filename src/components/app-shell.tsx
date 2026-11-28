@@ -61,10 +61,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className={styles.navAccount}>
             <Link
               href="/settings"
-              className={cn(sharedStyles.avatar, sharedStyles.avatarSm, sharedStyles.link)}
+              className={cn(styles.accountLink, sharedStyles.link)}
               title={user.name}
             >
-              {user.name.slice(0, 1)}
+              <span className={styles.accountName}>{user.name}</span>
+              <span className={cn(sharedStyles.avatar, sharedStyles.avatarSm)} aria-hidden="true">
+                {user.name.slice(0, 1)}
+              </span>
             </Link>
             <button
               aria-label="退出登录"

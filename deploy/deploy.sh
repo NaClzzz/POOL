@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 单机生产一键更新脚本：拉取代码 -> 构建镜像 -> 停应用跑迁移 -> 启动并校验状态。
+# 单机生产一键更新脚本：先停应用释放物理内存，再串行构建与迁移，适配小内存服务器。
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
@@ -19,15 +19,20 @@ if [ -z "${POOL_IMAGE_TAG:-}" ]; then
   export POOL_IMAGE_TAG
 fi
 
+export COMPOSE_PARALLEL_LIMIT=1
+
 dc() {
   docker compose --env-file .env.production -f compose.production.yaml "$@"
 }
 
 echo "[deploy] tag=${POOL_IMAGE_TAG}"
 dc --profile tools config --quiet
-dc --profile tools build
 dc up -d --wait postgres redis
 dc stop socket web
+dc build web
+dc build socket
+dc --profile tools build migrate
+dc build music
 dc --profile tools run --rm migrate
 dc up -d --wait
 dc ps

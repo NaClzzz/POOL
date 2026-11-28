@@ -18,6 +18,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Validate secrets and deploy via SSH
         env:
@@ -38,14 +39,15 @@ jobs:
 
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          printf '%s\n' "$ECS_SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
+          printf '%s\n' "$ECS_SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-          printf '%s\n' "$ECS_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$ECS_SSH_KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
           PORT="${ECS_PORT:-22}"
           trap 'rm -f ~/.ssh/id_deploy ~/.ssh/known_hosts' EXIT
-          ssh -p "$PORT" -i ~/.ssh/id_deploy -o BatchMode=yes \
+          ssh -p "$PORT" -i ~/.ssh/id_deploy -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=60 \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts \
             "${ECS_USER}@${ECS_HOST}" \
             "cd $(printf '%q' "$ECS_DEPLOY_PATH") && git pull --ff-only && SKIP_PULL=1 bash ./deploy/deploy.sh"

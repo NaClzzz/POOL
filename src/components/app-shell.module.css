@@ -71,6 +71,22 @@
   align-items: center;
 }
 
+.accountLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.accountName {
+  font-size: 14px;
+  color: var(--foreground);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .page {
   max-width: 1336px;
   margin: 0 auto;
